@@ -213,6 +213,7 @@ class MarkdownChunker:
     def _split_by_paragraphs(self, header_context: str, content: str) -> list[Chunk]:
         """
         Split content into chunks on paragraph boundaries.
+        Respects code blocks and tables as atomic units.
 
         Args:
             header_context: Header hierarchy string
@@ -221,8 +222,8 @@ class MarkdownChunker:
         Returns:
             List of chunks
         """
-        # Split on double newlines (paragraph boundaries)
-        paragraphs = re.split(r"\n\s*\n", content)
+        # Get logical paragraphs (code blocks/tables are single paragraphs)
+        paragraphs = self._get_logical_paragraphs(content)
 
         chunks = []
         current_chunk_paragraphs = []
@@ -235,7 +236,7 @@ class MarkdownChunker:
 
             para_tokens = count_tokens(paragraph, self.model)
 
-            # If single paragraph exceeds max size, split it further
+            # If single paragraph exceeds max size
             if para_tokens > self.max_chunk_size:
                 # Save current chunk if any
                 if current_chunk_paragraphs:
@@ -251,9 +252,26 @@ class MarkdownChunker:
                     current_chunk_paragraphs = []
                     current_token_count = 0
 
-                # Split oversized paragraph by sentences
-                sentence_chunks = self._split_by_sentences(header_context, paragraph)
-                chunks.extend(sentence_chunks)
+                # Check if it's a protected block (code or table)
+                if self._is_protected_block(paragraph):
+                    # For protected blocks, we prefer to keep them whole even if slightly oversized
+                    # OR split by lines if absolutely necessary.
+                    # For now, let's treat them as atomic and allow them to exceed max_size slightly
+                    # matching the implementation plan preference not to break code.
+                    # If it's absurdly large, we might need line splitting, but let's just log/warn
+                    # or currently just append it as a single chunk.
+                    chunks.append(
+                        Chunk(
+                            content=paragraph,
+                            chunk_index=0,
+                            header_context=header_context,
+                            token_count=para_tokens,
+                        )
+                    )
+                else:
+                    # Split oversized normal paragraph by sentences
+                    sentence_chunks = self._split_by_sentences(header_context, paragraph)
+                    chunks.extend(sentence_chunks)
                 continue
 
             # Check if adding this paragraph would exceed target
@@ -291,6 +309,57 @@ class MarkdownChunker:
             )
 
         return chunks
+
+    def _get_logical_paragraphs(self, content: str) -> list[str]:
+        """
+        Split content into logical paragraphs, preserving code blocks and tables.
+
+        Args:
+            content: Markdown content
+
+        Returns:
+            List of paragraph strings
+        """
+        # Regex for fenced code blocks
+        code_block_pattern = r"(```[\s\S]*?```)"
+        
+        # Regex for tables (simplified: lines starting with | and ending with | or similar)
+        # We'll use a slightly more robust pattern that captures contiguous lines of table-like text
+        # But for now, let's focus on identifying the block.
+        # Table pattern: Start of line, pipe, content... end of line. Repeated.
+        # This is tricky with regex.
+        # Alternative: We split by code blocks first. Then within non-code, we check for tables?
+        # Let's stick to the code block pattern first as it's the primary failure mode.
+        
+        # Split by code blocks, capturing the delimiters
+        # This returns [text, code_block, text, code_block...]
+        parts = re.split(code_block_pattern, content)
+        
+        logical_paragraphs = []
+        
+        for part in parts:
+            if not part.strip():
+                continue
+                
+            if part.strip().startswith("```"):
+                # This is a code block, treat as one paragraph
+                logical_paragraphs.append(part.strip())
+            else:
+                # This is normal text (potentially containing tables)
+                # For tables, standard paragraph splitting (\n\n) usually keeps them together 
+                # because tables don't have blank lines inside.
+                # So we just apply standard splitting here.
+                sub_paragraphs = re.split(r"\n\s*\n", part)
+                for sub in sub_paragraphs:
+                    if sub.strip():
+                        logical_paragraphs.append(sub.strip())
+                        
+        return logical_paragraphs
+
+    def _is_protected_block(self, text: str) -> bool:
+        """Check if text is a code block or table."""
+        text = text.strip()
+        return text.startswith("```") or text.startswith("|")
 
     def _split_by_sentences(self, header_context: str, content: str) -> list[Chunk]:
         """

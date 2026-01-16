@@ -193,7 +193,7 @@ def index_note(note_path: str) -> Dict[str, Any]:
 
 ---
 
-### Priority 4: Enhanced Chunking (Code Blocks, Tables)
+### Priority 4: Enhanced Chunking (Code Blocks, Tables) ✅ COMPLETE
 
 **Goal:** Improve chunking to respect code block and table boundaries.
 
@@ -230,7 +230,10 @@ table_pattern = r'^\|.+\|$'  # Multiline with M flag
 **Complexity:** Medium (3-4 hours)
 **Dependencies:** None
 **Files to modify:** `crawlers/markdown_crawler.py`
-**Testing:** Update `test_chunker_inline.py` with code block examples
+**Testing:** `tests/test_enhanced_chunking.py` verifies integrity.
+**Status:** ✅ COMPLETE
+- **Implementation:** `_get_logical_paragraphs` extracts atomic code blocks.
+- **Protection:** Code blocks are never split by paragraph newlines.
 
 ---
 
