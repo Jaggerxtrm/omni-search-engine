@@ -6,20 +6,24 @@ Agent-first semantic search system for Obsidian vaults using OpenAI embeddings, 
 
 - 🔍 **Semantic search** across your entire vault
 - 🔗 **Smart link suggestions** based on content similarity
+- ⚡ **Async Architecture** - Non-blocking operations for high performance
 - 📊 **Markdown-aware chunking** with header hierarchy preservation
 - 💾 **Incremental indexing** with content-hash caching (saves API costs)
 - 🐳 **Containerized** for easy deployment (Podman/Docker)
 - 🔒 **Privacy-focused** - vectors stored locally, queries never leave your machine
 - 🏗️ **Modular Architecture** - scalable design with Pydantic settings and Dependency Injection
+- 🛡️ **Robust CI/CD** - Type checking (MyPy), Linting (Ruff), and Pre-commit hooks
 
 ## Status
 
 **Current Progress:** Refactoring Complete & Containerized ✅
 
 ✅ **Completed:**
+- **Async Refactor**: Fully asynchronous server and tool execution
+- **Code Quality**: Strict type checking (Python 3.13) and linting pipeline
 - **Modular Architecture**: Service-based design with Dependency Injection
 - **Robust Configuration**: Pydantic-based settings validation
-- **Containerization**: Optimized image `omni-search-engine` (Python 3.13)
+- **Containerization**: Optimized image `omni-search-engine`
 - **Core Features**: All MVP tools (Search, Indexing, Stats, Link Suggestions)
 - **Auto-Indexing**: Efficient file watcher with coalescing debounce
 
@@ -28,7 +32,7 @@ Agent-first semantic search system for Obsidian vaults using OpenAI embeddings, 
 ```
 Obsidian Vault (.md files)
     ↓
-File Watcher / API Tools
+File Watcher / API Tools (Async)
     ↓
 Services Layer (Indexer, Embeddings)
     ↓
@@ -42,6 +46,7 @@ MCP Server (FastMCP)
 - **Podman** or **Docker** (for containerized deployment)
 - **OpenAI API key** (for embeddings)
 - **Obsidian vault** with markdown files
+- **Python 3.13+** (for local development)
 
 ## Installation
 
@@ -93,20 +98,49 @@ Add to `~/.config/claude/claude_desktop_config.json`:
 
 **Important:** Replace paths with your actual vault location and API key.
 
+## Development
+
+### Setup
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Install pre-commit hooks
+pre-commit install
+```
+
+### Running Tests & Checks
+
+We provide a convenience script to run the full CI suite:
+
+```bash
+./scripts/check.sh
+```
+
+This runs:
+- **Ruff**: Linting and formatting
+- **MyPy**: Static type checking
+- **Pytest**: Unit and integration tests
+
 ## Project Structure
 
 ```
 obsidian-semantic-search/
 ├── api/                   # API endpoints (if applicable)
-├── crawlers/              # Document parsers (markdown_crawler.py)
+├── crawlers/              # Content parsers (markdown_crawler.py)
 ├── models/                # Data models
 ├── repositories/          # Data access (snippet_repository.py)
 ├── services/              # Business logic (indexer, embedding)
-├── server.py              # Main FastMCP entry point
+├── tests/                 # Test suite (pytest)
+├── scripts/               # CI/CD and utility scripts
+├── server.py              # Main FastMCP entry point (Async)
 ├── settings.py            # Pydantic configuration
 ├── dependencies.py        # Dependency Injection container
 ├── logger.py              # Centralized logging
 ├── watcher.py             # File system watcher
+├── .pre-commit-config.yaml # Git hooks configuration
+├── pyproject.toml         # Tool configuration (Ruff, MyPy)
 ├── Dockerfile             # Container definition
 └── docker-compose.yml     # Compose configuration
 ```

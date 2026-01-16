@@ -441,13 +441,12 @@ def semantic_search_with_rerank(query: str, n_results: int = 5):
 
 1. **Config changes:**
 ```yaml
-vaults:
   - name: "personal"
     path: "/home/user/personal-vault"
     chromadb_collection: "personal_notes"
-  - name: "work"
-    path: "/home/user/work-vault"
-    chromadb_collection: "work_notes"
+  - name: "project-docs"
+    path: "/home/user/projects/my-app/docs" # External docs folder
+    chromadb_collection: "project_docs"
 ```
 
 2. **Tool changes:**
@@ -460,6 +459,13 @@ def semantic_search(
         # Search specific vault
     else:
         # Search all vaults, merge results
+
+3. **Pipeline Integration (Symlink/External Support):**
+   - **Problem:** `inotify` (Linux watcher) does not follow symlinks by default.
+   - **Solution:**
+     - **Config-based:** Instead of symlinking `ln -s /project/docs ./vault/docs`, explicitly add `/project/docs` as a content root in `config.yaml`.
+     - **Watcher:** Must instantiate multiple `Observer` threads or schedule multiple watches, one for each root path.
+     - **Docker:** Use bind mounts (`-v /project/docs:/app/data/docs`) to map external folders into the container's accessible space.
 ```
 
 **Complexity:** High (6-8 hours)
@@ -549,7 +555,9 @@ Index commit messages and diffs to allow searching through project history.
 
 #### 5c. Documentation Sync
 Integrate with project documentation (e.g. `docs/` folders in repos) and potentially AI memories (Serena).
-- Treat external docs as a read-only vault extension.
+- **Integration:** Reuses the **Symlink/External Support** pipeline from Feature 2.
+- **Mechanism:** Add `docs/` paths as distinct roots in `config.yaml` (avoiding symlink issues).
+- **Result:** External docs appear as a read-only vault extension.
 
 #### 5d. Cross-Entity Search (Unified Vector Space)
 Leverage the single vector store to find code related to notes and vice versa.
@@ -565,13 +573,13 @@ Leverage the single vector store to find code related to notes and vice versa.
 #### 5f. Portability & Configuration (Logical Mounting)
 Decouple physical paths from database entries to ensure **100% portability**.
 - **Logical Source ID:** DB stores `source_id='trading-bot'` + relative path `src/main.py`.
-- **Physical Mapping:** `config.yaml` maps ID to local path.
+- **Physical Mapping:** Reuses the `config.yaml` mapping strategy defined in Feature 2.
   ```yaml
   sources:
     - id: "trading-bot"
-      path: "/home/user/projects/trading-bot" # Local path
+      path: "/home/user/projects/trading-bot" # Local path (Bind mount target in Docker)
   ```
-- **Benefit:** Database can be moved between machines (Home/VPS) without re-indexing; simply update `config.yaml`.
+- **Benefit:** Database can be moved between machines (Home/VPS) without re-indexing; simply update `config.yaml` to point to valid local paths.
 
 **Complexity:** Very High (20+ hours)
 **Prerequisites:** Multiple Vault Support

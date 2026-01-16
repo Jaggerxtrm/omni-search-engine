@@ -25,7 +25,7 @@ from logger import get_logger, setup_logging
 
 # Modular imports
 from settings import get_settings
-from utils import compute_content_hash
+from utils import compute_content_hash, extract_wikilinks
 
 logger = get_logger("server")
 
@@ -273,6 +273,9 @@ async def suggest_links(
         with open(abs_path, encoding="utf-8") as f:
             content = f.read()
 
+        # Deduplication: Find existing links to avoid suggesting them again
+        existing_links = set(extract_wikilinks(content))
+
         # 2. Check for cached embeddings (Smart Caching)
         current_hash = str(compute_content_hash(content)).strip()
         stored_hash = vector_store.check_content_hash(note_path)
@@ -330,9 +333,14 @@ async def suggest_links(
 
             for i in range(len(ids)):
                 match_file = str(metadatas[i].get("file_path", ""))
+                match_title = str(metadatas[i].get("note_title", ""))
 
                 # Exclude current file
                 if exclude_current and match_file == note_path:
+                    continue
+
+                # Exclude existing links
+                if match_title in existing_links:
                     continue
 
                 distance = distances[i]

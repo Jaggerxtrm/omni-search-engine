@@ -1,39 +1,39 @@
 ---
-title: Omni-Search Engine SSOT - Architecture & Overview
-version: 0.1.0
-updated: 2026-01-16T03:35:00+01:00
+title: SSOT Project Overview
+version: 0.2.0
+updated: 2026-01-16T10:15:00+01:00
+scope: meta
 category: meta
 subcategory: overview
-domain: [meta, architecture, project]
-branch: main
-plan_ref: mcp-refactoring.md
+domain: [meta, documentation]
+changelog:
+  - 0.2.0 (2026-01-16): Updated with Async architecture and CI/CD details
+  - 0.1.0 (2026-01-16): Initial overview based on README and codebase analysis
 ---
 
-## Architecture
-- **Type**: MCP Server (Model Context Protocol).
-- **Stack**: Python 3.13, FastMCP, ChromaDB, OpenAI Embeddings, Pydantic.
-- **Data Flow**:
-  - **Ingest**: File Watcher/Manual Trigger → `IndexerService` → `MarkdownCrawler` (Chunking) → `EmbeddingService` (OpenAI) → `SnippetRepository` (ChromaDB).
-  - **Query**: Client (Claude) → `server.py` (Tool) → `EmbeddingService` (Query Embedding) → `SnippetRepository` (Vector Search) → Result.
-
-## Infrastructure
-- **Containerization**: Podman/Docker.
-- **Base Image**: `python:3.13-slim`.
-- **Persistence**: 
-  - Vault: Read-only bind mount (`/vault`).
-  - ChromaDB: Named volume (`obsidian_search_data` mapped to `/data/chromadb`).
-- **Config**: Environment variables (`.env`) mapped to `settings.py`.
+## Project Mission
+To provide an "agent-first" semantic search system for Obsidian vaults, enabling AI agents to efficiently retrieve, link, and understand knowledge bases via the Model Context Protocol (MCP).
 
 ## Core Capabilities
-1. **Semantic Search**: Natural language query -> Vector search.
-2. **Smart Indexing**: Content-addressable hashing to skip unchanged files (cost optimization).
-3. **Auto-Recovery**: Graceful handling of disconnected clients (`anyio.ClosedResourceError`).
-4. **Link Suggestions**: Semantic similarity to suggest related notes.
+1. **Semantic Search**: Natural language queries over markdown notes.
+2. **Auto-Indexing**: Real-time updates via file system watching.
+3. **Smart Linking**: Suggested connections based on content similarity.
+4. **Efficiency**: Incremental indexing using content hashing to minimize API costs.
+5. **Deployment**: Containerized, modular architecture for ease of use.
+6. **Code Quality**: Enforced by strict CI pipeline (MyPy, Ruff).
 
-## Current Status (v1.0 MVP)
-- Modular architecture implemented.
-- Stable container build.
-- Documentation standardized.
+## Technical Stack
+- **Language**: Python 3.13+ (AsyncIO)
+- **Protocol**: Model Context Protocol (FastMCP)
+- **Vector Store**: ChromaDB (local persistence)
+- **Embeddings**: OpenAI (text-embedding-3-small)
+- **Watcher**: Watchdog
+- **Configuration**: Pydantic Settings
+- **Quality Assurance**: Ruff (Linting), MyPy (Type Checking), Pytest (Testing)
 
-## Known Issues
-- `anyio.ClosedResourceError` in logs (benign upstream issue).
+## Key Design Principles
+- **Modularity**: Service-oriented architecture with strict separation of concerns.
+- **Asynchrony**: Non-blocking I/O for responsiveness.
+- **Dependency Injection**: Explicit dependencies for better testing and flexibility.
+- **Privacy**: Local vector storage; only embeddings are sent to API.
+- **Reliability**: Robust error handling and logging.

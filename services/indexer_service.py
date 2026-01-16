@@ -44,6 +44,16 @@ class IndexingResult:
     errors: list[str] = field(default_factory=list)
 
 
+from utils import (
+    compute_content_hash,
+    count_tokens,
+    extract_all_tags,
+    extract_wikilinks,
+    get_folder,
+    get_note_title,
+    get_relative_path,
+)
+
 class VaultIndexer:
     """
     Orchestrates indexing of an Obsidian vault.
@@ -210,6 +220,8 @@ class VaultIndexer:
         note_title = get_note_title(file_path)
         folder = get_folder(file_path, self.vault_path)
         tags = extract_all_tags(content)
+        links = extract_wikilinks(content)
+        links_str = ",".join(links)
         modified_date = file_path.stat().st_mtime
 
         # Restore content_hash variable for metadata usage
@@ -245,6 +257,7 @@ class VaultIndexer:
                 "header_context": chunk.header_context,
                 "folder": chunk.folder,
                 "tags": chunk.tags,
+                "outbound_links": links_str,
                 "modified_date": modified_date,
                 "content_hash": content_hash,
                 "token_count": chunk.token_count,

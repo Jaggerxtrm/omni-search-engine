@@ -246,3 +246,36 @@ def extract_all_tags(content: str) -> list[str]:
     all_tags = frontmatter_tags + [t for t in inline_tags if t not in frontmatter_tags]
 
     return all_tags
+
+def extract_wikilinks(content: str) -> list[str]:
+    """
+    Extract wikilinks from markdown content.
+
+    Handles formats:
+    - [[Note Name]] -> Note Name
+    - [[Note Name|Alias]] -> Note Name
+    - [[Note Name#Header]] -> Note Name
+    - [[Note Name#Header|Alias]] -> Note Name
+
+    Args:
+        content: Markdown content
+
+    Returns:
+        List of unique linked note names (without .md extension)
+    """
+    # Pattern: [[ (note_name) (separator (alias/header)) ]]
+    # [^\]|#]* matches the note name until | or # or ]
+    pattern = r"\[\[([^\]|#]+)(?:[|#][^\]]+)?\]\]"
+    
+    matches = re.findall(pattern, content)
+    
+    # Deduplicate while preserving order
+    seen = set()
+    links = []
+    for link in matches:
+        link = link.strip()
+        if link and link not in seen:
+            links.append(link)
+            seen.add(link)
+            
+    return links
