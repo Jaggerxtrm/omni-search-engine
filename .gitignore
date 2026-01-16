@@ -1,1 +1,12 @@
 .env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.mypy_cache/
+.ruff_cache/
+check_output*.txt

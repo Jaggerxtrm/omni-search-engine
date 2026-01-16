@@ -8,7 +8,7 @@ and metadata extraction from markdown files.
 import hashlib
 import re
 from pathlib import Path
-from typing import List
+
 import tiktoken
 import yaml
 
@@ -23,7 +23,7 @@ def compute_content_hash(content: str) -> str:
     Returns:
         Hexadecimal MD5 hash string
     """
-    return hashlib.md5(content.encode('utf-8')).hexdigest()
+    return hashlib.md5(content.encode("utf-8")).hexdigest()
 
 
 def count_tokens(text: str, model: str = "text-embedding-3-small") -> int:
@@ -69,7 +69,7 @@ def get_relative_path(file_path: Path, vault_path: Path) -> str:
         return str(file_path)
 
 
-def extract_frontmatter_tags(content: str) -> List[str]:
+def extract_frontmatter_tags(content: str) -> list[str]:
     """
     Extract tags from YAML frontmatter.
 
@@ -89,13 +89,13 @@ def extract_frontmatter_tags(content: str) -> List[str]:
     tags = []
 
     # Check if content starts with YAML frontmatter (--- delimiter)
-    if not content.startswith('---'):
+    if not content.startswith("---"):
         return tags
 
     # Find end of frontmatter
     try:
         # Split on first occurrence of --- after the opening ---
-        parts = content.split('---', 2)
+        parts = content.split("---", 2)
         if len(parts) < 3:
             return tags
 
@@ -108,22 +108,22 @@ def extract_frontmatter_tags(content: str) -> List[str]:
             return tags
 
         # Extract tags field
-        tags_field = frontmatter.get('tags', [])
+        tags_field = frontmatter.get("tags", [])
 
         # Handle different formats
         if isinstance(tags_field, list):
             # tags: [tag1, tag2]  or  tags:\n  - tag1\n  - tag2
             for tag in tags_field:
-                tag_str = str(tag).strip().lstrip('#')
+                tag_str = str(tag).strip().lstrip("#")
                 if tag_str:
                     tags.append(tag_str)
 
         elif isinstance(tags_field, str):
             # tags: tag1, tag2  or  tags: #tag1 #tag2
             # Split on commas and/or spaces
-            tag_parts = re.split(r'[,\s]+', tags_field)
+            tag_parts = re.split(r"[,\s]+", tags_field)
             for tag in tag_parts:
-                tag_str = tag.strip().lstrip('#')
+                tag_str = tag.strip().lstrip("#")
                 if tag_str:
                     tags.append(tag_str)
 
@@ -134,7 +134,7 @@ def extract_frontmatter_tags(content: str) -> List[str]:
     return tags
 
 
-def extract_inline_tags(content: str) -> List[str]:
+def extract_inline_tags(content: str) -> list[str]:
     """
     Extract inline hashtags from markdown content.
 
@@ -150,18 +150,18 @@ def extract_inline_tags(content: str) -> List[str]:
     tags = []
 
     # Remove code blocks (```) to avoid matching tags in code
-    content_no_code = re.sub(r'```.*?```', '', content, flags=re.DOTALL)
+    content_no_code = re.sub(r"```.*?```", "", content, flags=re.DOTALL)
 
     # Remove inline code (`) to avoid matching tags in code
-    content_no_code = re.sub(r'`[^`]+`', '', content_no_code)
+    content_no_code = re.sub(r"`[^`]+`", "", content_no_code)
 
     # Remove markdown headers (# at start of line) to avoid false positives
-    content_no_code = re.sub(r'^\s*#+\s+.*$', '', content_no_code, flags=re.MULTILINE)
+    content_no_code = re.sub(r"^\s*#+\s+.*$", "", content_no_code, flags=re.MULTILINE)
 
     # Find hashtags: word boundary, #, then alphanumeric/underscore/hyphen
     # Negative lookbehind for URLs (no :// before)
     # Negative lookahead for more # (avoid matching ##, ###, etc.)
-    pattern = r'(?<!://.)(?<!\w)#([a-zA-Z0-9_-]+)(?!\w)'
+    pattern = r"(?<!://.)(?<!\w)#([a-zA-Z0-9_-]+)(?!\w)"
 
     matches = re.findall(pattern, content_no_code)
 
@@ -217,19 +217,19 @@ def remove_frontmatter(content: str) -> str:
     Returns:
         Content without frontmatter
     """
-    if not content.startswith('---'):
+    if not content.startswith("---"):
         return content
 
     # Find end of frontmatter
-    parts = content.split('---', 2)
+    parts = content.split("---", 2)
     if len(parts) < 3:
         return content  # Malformed frontmatter, return as-is
 
     # Return content after second ---
-    return parts[2].lstrip('\n')
+    return parts[2].lstrip("\n")
 
 
-def extract_all_tags(content: str) -> List[str]:
+def extract_all_tags(content: str) -> list[str]:
     """
     Extract all tags from markdown: frontmatter + inline.
 

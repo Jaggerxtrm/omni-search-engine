@@ -6,24 +6,29 @@ Exposes tools for searching notes, indexing, and managing the vector store.
 """
 
 import os
-import sys
 import re
-from typing import Optional, Dict, Any, List
+import statistics
+import sys
+from collections import defaultdict
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastmcp import FastMCP
-from logger import setup_logging, get_logger
+
+from dependencies import (
+    get_embedding_service,
+    get_fresh_indexer,
+    get_indexer,
+    get_vector_store,
+)
+from logger import get_logger, setup_logging
 
 # Modular imports
 from settings import get_settings
-from dependencies import get_indexer, get_vector_store, get_embedding_service
-# Type hinting imports
-from services.indexer_service import VaultIndexer
-from repositories.snippet_repository import VectorStore
-from services.embedding_service import EmbeddingService
-
+from utils import compute_content_hash
 
 logger = get_logger("server")
+
 
 @asynccontextmanager
 async def lifespan(server: FastMCP):
@@ -33,30 +38,31 @@ async def lifespan(server: FastMCP):
         # Startup logic
         setup_logging()
         logger.info("Pre-warming services...")
-        
+
         # Access dependencies to trigger lazy initialization
         get_settings()
         get_embedding_service()
         get_vector_store()
         get_indexer()
-        
+
         logger.info("Services pre-warmed successfully.")
 
         # Start Watcher if enabled
         if os.environ.get("WATCH_MODE", "false").lower() == "true":
             from watcher import VaultWatcher
-            
+
             logger.info("Auto-indexing enabled (WATCH_MODE=true)")
             settings = get_settings()
+            # Use fresh indexer for watcher thread to avoid sharing async loop resources
             watcher = VaultWatcher(
                 vault_path=settings.obsidian_vault_path,
-                indexer=get_indexer(),
-                vector_store=get_vector_store()
+                indexer=get_fresh_indexer(),
+                vector_store=get_vector_store(),
             )
             watcher.start()
-            
+
         yield
-        
+
     finally:
         # Shutdown logic
         if watcher:
@@ -64,17 +70,15 @@ async def lifespan(server: FastMCP):
             watcher.stop()
             logger.info("Vault Watcher stopped.")
 
+
 # Initialize FastMCP server with lifespan
 mcp = FastMCP("obsidian-semantic-search", lifespan=lifespan)
 
 
 @mcp.tool()
-def semantic_search(
-    query: str,
-    n_results: int = 5,
-    folder: Optional[str] = None,
-    tags: Optional[str] = None
-) -> List[Dict[str, Any]]:
+async def semantic_search(
+    query: str, n_results: int = 5, folder: str | None = None, tags: str | None = None
+) -> list[dict[str, Any]]:
     """
     Search vault semantically for notes matching the query.
 
@@ -87,15 +91,17 @@ def semantic_search(
     Returns:
         List of search results with content, metadata, and similarity scores
     """
-    logger.info(f"Tool Call: semantic_search | Query: '{query}' | Folder: {folder} | Tags: {tags}")
+    logger.info(
+        f"Tool Call: semantic_search | Query: '{query}' | Folder: {folder} | Tags: {tags}"
+    )
     try:
         # Get services
         embedding_service = get_embedding_service()
         vector_store = get_vector_store()
-        
+
         # Generate query embedding
         logger.debug(f"Generating embedding for query: '{query}'")
-        query_embedding = embedding_service.embed_single(query)
+        query_embedding = await embedding_service.embed_single(query)
 
         # Build metadata filter
         where_filter = None
@@ -110,34 +116,32 @@ def semantic_search(
 
         # Query vector store
         results = vector_store.query(
-            query_embedding=query_embedding,
-            n_results=n_results,
-            where=where_filter
+            query_embedding=query_embedding, n_results=n_results, where=where_filter
         )
 
         # Format results with similarity scores
         formatted_results = []
-        for i in range(len(results['ids'])):
-            distance = results['distances'][i]
+        for i in range(len(results["ids"])):
+            distance = results["distances"][i]
             similarity = 1 - distance  # Convert distance to similarity
 
-            metadata = results['metadatas'][i]
+            metadata = results["metadatas"][i]
 
             # Convert comma-separated tags back to list
-            tags_str = metadata.get('tags', '')
-            tags_list = [t.strip() for t in tags_str.split(',') if t.strip()]
+            tags_str = metadata.get("tags", "")
+            tags_list = [t.strip() for t in tags_str.split(",") if t.strip()]
 
             result = {
-                'id': results['ids'][i],
-                'content': results['documents'][i],
-                'similarity': round(similarity, 3),
-                'file_path': metadata.get('file_path', ''),
-                'note_title': metadata.get('note_title', ''),
-                'header_context': metadata.get('header_context', ''),
-                'folder': metadata.get('folder', ''),
-                'tags': tags_list,
-                'chunk_index': metadata.get('chunk_index', 0),
-                'token_count': metadata.get('token_count', 0)
+                "id": results["ids"][i],
+                "content": results["documents"][i],
+                "similarity": round(similarity, 3),
+                "file_path": metadata.get("file_path", ""),
+                "note_title": metadata.get("note_title", ""),
+                "header_context": metadata.get("header_context", ""),
+                "folder": metadata.get("folder", ""),
+                "tags": tags_list,
+                "chunk_index": metadata.get("chunk_index", 0),
+                "token_count": metadata.get("token_count", 0),
             }
             formatted_results.append(result)
 
@@ -146,14 +150,11 @@ def semantic_search(
 
     except Exception as e:
         logger.error(f"Search failed: {e}", exc_info=True)
-        return [{
-            'error': f"Search failed: {str(e)}",
-            'query': query
-        }]
+        return [{"error": f"Search failed: {str(e)}", "query": query}]
 
 
 @mcp.tool()
-def reindex_vault(force: bool = False) -> Dict[str, Any]:
+async def reindex_vault(force: bool = False) -> dict[str, Any]:
     """
     Rebuild or update the entire vault index.
 
@@ -172,33 +173,36 @@ def reindex_vault(force: bool = False) -> Dict[str, Any]:
     logger.info(f"Tool Call: reindex_vault | Force: {force}")
     try:
         indexer = get_indexer()
-        result = indexer.index_vault(force=force)
-        
-        logger.info(f"Reindex complete. Stats: Processed={result.notes_processed}, chunks={result.chunks_created}")
+        result = await indexer.index_vault(force=force)
+
+        logger.info(
+            f"Reindex complete. Stats: Processed={result.notes_processed}, "
+            f"chunks={result.chunks_created}"
+        )
         return {
-            'success': True,
-            'notes_processed': result.notes_processed,
-            'notes_skipped': result.notes_skipped,
-            'chunks_created': result.chunks_created,
-            'duration_seconds': round(result.duration_seconds, 2),
-            'errors': result.errors
+            "success": True,
+            "notes_processed": result.notes_processed,
+            "notes_skipped": result.notes_skipped,
+            "chunks_created": result.chunks_created,
+            "duration_seconds": round(result.duration_seconds, 2),
+            "errors": result.errors,
         }
 
     except Exception as e:
         logger.error(f"Reindex failed: {e}", exc_info=True)
         return {
-            'success': False,
-            'error': f"Indexing failed: {str(e)}",
-            'notes_processed': 0,
-            'notes_skipped': 0,
-            'chunks_created': 0,
-            'duration_seconds': 0,
-            'errors': [str(e)]
+            "success": False,
+            "error": f"Indexing failed: {str(e)}",
+            "notes_processed": 0,
+            "notes_skipped": 0,
+            "chunks_created": 0,
+            "duration_seconds": 0,
+            "errors": [str(e)],
         }
 
 
 @mcp.tool()
-def get_index_stats() -> Dict[str, Any]:
+def get_index_stats() -> dict[str, Any]:
     """
     Get statistics about the current index.
 
@@ -217,31 +221,31 @@ def get_index_stats() -> Dict[str, Any]:
         stats = vector_store.get_stats()
 
         return {
-            'total_chunks': stats['total_chunks'],
-            'total_files': stats['total_files'],
-            'vault_path': str(settings.obsidian_vault_path),
-            'chromadb_path': stats['persist_directory'],
-            'embedding_model': settings.embedding.model,
-            'collection_name': stats['collection_name']
+            "total_chunks": stats["total_chunks"],
+            "total_files": stats["total_files"],
+            "vault_path": str(settings.obsidian_vault_path),
+            "chromadb_path": stats["persist_directory"],
+            "embedding_model": settings.embedding.model,
+            "collection_name": stats["collection_name"],
         }
 
     except Exception as e:
         return {
-            'error': f"Failed to get stats: {str(e)}",
-            'total_chunks': 0,
-            'total_files': 0
+            "error": f"Failed to get stats: {str(e)}",
+            "total_chunks": 0,
+            "total_files": 0,
         }
 
 
 @mcp.tool()
-def suggest_links(
+async def suggest_links(
     note_path: str,
     n_suggestions: int = 5,
     min_similarity: float = 0.5,
     exclude_current: bool = True,
-    folder: Optional[str] = None,
-    tags: Optional[str] = None
-) -> List[Dict[str, Any]]:
+    folder: str | None = None,
+    tags: str | None = None,
+) -> list[dict[str, Any]]:
     """
     Suggest related notes to link based on content similarity.
     OPTIMIZED: reuses existing embeddings if file hasn't changed.
@@ -254,10 +258,6 @@ def suggest_links(
         folder: Optional folder filter for suggestions
         tags: Optional comma-separated string of tags. NOT a list.
     """
-    
-    from collections import defaultdict
-    import statistics
-    from utils import compute_content_hash
 
     try:
         settings = get_settings()
@@ -268,9 +268,9 @@ def suggest_links(
         # 1. Read target note
         abs_path = settings.obsidian_vault_path / note_path
         if not abs_path.exists():
-            return [{'error': f"File not found: {note_path}"}]
+            return [{"error": f"File not found: {note_path}"}]
 
-        with open(abs_path, 'r', encoding='utf-8') as f:
+        with open(abs_path, encoding="utf-8") as f:
             content = f.read()
 
         # 2. Check for cached embeddings (Smart Caching)
@@ -278,32 +278,32 @@ def suggest_links(
         stored_hash = vector_store.check_content_hash(note_path)
         if stored_hash:
             stored_hash = str(stored_hash).strip()
-        
+
         embeddings = []
-        
+
         if stored_hash and stored_hash == current_hash:
             # Case A: File unchanged, reuse embeddings!
             file_data = vector_store.get_by_file_path(note_path)
-            embeddings = file_data.get('embeddings', [])
+            embeddings = file_data.get("embeddings", [])
         else:
             # Case B: File modified or new, must generate
             # Using indexer.chunker which is initialized via DI
             chunks = indexer.chunker.chunk_markdown(content)
-             # Extract text from chunks
+            # Extract text from chunks
             chunk_texts = [c.content for c in chunks]
             if chunk_texts:
-                embeddings = embedding_service.embed_texts(chunk_texts)
+                embeddings = await embedding_service.embed_texts(chunk_texts)
 
         # Ensure embeddings is a list of lists, not numpy array
-        if hasattr(embeddings, 'tolist'):
+        if hasattr(embeddings, "tolist"):
             embeddings = embeddings.tolist()
 
         if not embeddings or len(embeddings) == 0:
-            return [{'error': "No content to analyze in this note"}]
+            return [{"error": "No content to analyze in this note"}]
 
         # 3. Query for similar chunks (using all embeddings)
         all_results = []
-        
+
         # Build metadata filter
         where_filter = None
         if folder or tags:
@@ -313,99 +313,108 @@ def suggest_links(
             if tags:
                 where_filter["tags"] = tags
 
-        for idx, embedding in enumerate(embeddings):
-            if hasattr(embedding, 'tolist'):
+        for _idx, embedding in enumerate(embeddings):
+            if hasattr(embedding, "tolist"):
                 embedding = embedding.tolist()
 
             results = vector_store.query(
                 query_embedding=embedding,
-                n_results=n_suggestions * 2, # Fetch more to filter
-                where=where_filter
+                n_results=n_suggestions * 2,  # Fetch more to filter
+                where=where_filter,
             )
-            
+
             # Unpack results
-            ids = results['ids']
-            distances = results['distances']
-            metadatas = results['metadatas']
-            
+            ids = results["ids"]
+            distances = results["distances"]
+            metadatas = results["metadatas"]
+
             for i in range(len(ids)):
-                match_file = str(metadatas[i].get('file_path', ''))
-                
+                match_file = str(metadatas[i].get("file_path", ""))
+
                 # Exclude current file
                 if exclude_current and match_file == note_path:
                     continue
-                
+
                 distance = distances[i]
                 # Handle numpy types if present
-                if hasattr(distance, 'item'):
+                if hasattr(distance, "item"):
                     distance = distance.item()
-                
+
                 similarity = 1.0 - float(distance)
-                
+
                 if float(similarity) < min_similarity:
                     continue
 
-                all_results.append({
-                    'file_path': match_file,
-                    'metadata': metadatas[i],
-                    'similarity': float(similarity)
-                })
+                all_results.append(
+                    {
+                        "file_path": match_file,
+                        "metadata": metadatas[i],
+                        "similarity": float(similarity),
+                    }
+                )
 
         # 4. Aggregate by file
         file_scores = defaultdict(list)
         file_metadata = {}
 
         for res in all_results:
-            fpath = res['file_path']
-            file_scores[fpath].append(res['similarity'])
+            fpath = res["file_path"]
+            file_scores[fpath].append(res["similarity"])
             # Keep metadata of best match
-            if fpath not in file_metadata or res['similarity'] > file_metadata[fpath]['similarity']:
-                 file_metadata[fpath] = {
-                     'metadata': res['metadata'],
-                     'similarity': res['similarity']
-                 }
+            if (
+                fpath not in file_metadata
+                or res["similarity"] > file_metadata[fpath]["similarity"]
+            ):
+                file_metadata[fpath] = {
+                    "metadata": res["metadata"],
+                    "similarity": res["similarity"],
+                }
 
         # 5. Rank suggestions
         suggestions = []
         for fpath, scores in file_scores.items():
             avg_score = statistics.mean(scores)
             max_score = max(scores)
-            # Weighted score: heavily favor max similarity (relevance) but boost by frequency (coverage)
+            # Weighted score: heavily favor max similarity (relevance)
+            # but boost by frequency (coverage)
             final_score = (max_score * 0.7) + (avg_score * 0.3)
-            
-            meta = file_metadata[fpath]['metadata']
-            
+
+            meta = file_metadata[fpath]["metadata"]
+
             # Format suggested link
-            target_header = meta.get('header_context', '')
+            target_header = meta.get("header_context", "")
             # Clean header # syntax
-            clean_header = target_header.split(' / ')[-1].replace('#', '').strip() if target_header else ''
-            
+            clean_header = (
+                target_header.split(" / ")[-1].replace("#", "").strip()
+                if target_header
+                else ""
+            )
+
             link = f"[[{meta.get('note_title')}]]"
             if clean_header:
-               link = f"[[{meta.get('note_title')}#{clean_header}]]"
+                link = f"[[{meta.get('note_title')}#{clean_header}]]"
 
-            suggestions.append({
-                'file_path': fpath,
-                'note_title': meta.get('note_title'),
-                'similarity': round(final_score, 3),
-                'reason': f"Related to section: {target_header}",
-                'suggested_link': link
-            })
+            suggestions.append(
+                {
+                    "file_path": fpath,
+                    "note_title": meta.get("note_title"),
+                    "similarity": round(final_score, 3),
+                    "reason": f"Related to section: {target_header}",
+                    "suggested_link": link,
+                }
+            )
 
         # Sort by score descending
-        suggestions.sort(key=lambda x: x['similarity'], reverse=True)
-        
+        suggestions.sort(key=lambda x: x["similarity"], reverse=True)
+
         return suggestions[:n_suggestions]
 
     except Exception as e:
-        return [{
-            'error': f"Suggestion failed: {str(e)}",
-            'path': note_path
-        }]
+        return [{"error": f"Suggestion failed: {str(e)}", "path": note_path}]
 
 
 @mcp.tool()
-def index_note(note_path: str) -> Dict[str, Any]:
+async def index_note(note_path: str) -> dict[str, Any]:
     """
     Index (or re-index) a specific note.
 
@@ -420,35 +429,29 @@ def index_note(note_path: str) -> Dict[str, Any]:
         abs_path = settings.obsidian_vault_path / note_path
         if not abs_path.exists():
             logger.warning(f"Note not found: {note_path}")
-            return {'error': f"File not found: {note_path}"}
+            return {"error": f"File not found: {note_path}"}
 
         # Index the file using the exposed method
-        chunks = indexer.index_single_file(abs_path)
-        
+        chunks = await indexer.index_single_file(abs_path)
+
         logger.info(f"Indexed note: {note_path} | Chunks: {chunks}")
-        return {
-            'success': True,
-            'file': note_path,
-            'chunks_indexed': chunks
-        }
+        return {"success": True, "file": note_path, "chunks_indexed": chunks}
     except Exception as e:
         logger.error(f"Indexing failed for {note_path}: {e}", exc_info=True)
         return {
-            'success': False,
-            'error': f"Indexing failed: {str(e)}",
-            'file': note_path
+            "success": False,
+            "error": f"Indexing failed: {str(e)}",
+            "file": note_path,
         }
 
 
 @mcp.tool()
 def search_notes(
-    pattern: str,
-    root_path: Optional[str] = None,
-    max_results: int = 50
-) -> List[str]:
+    pattern: str, root_path: str | None = None, max_results: int = 50
+) -> list[str]:
     """
     Find notes matching a regex pattern in the filename or relative path.
-    
+
     Args:
         pattern: Regex pattern to match (case-insensitive).
         root_path: Optional relative path to restrict search (e.g. "1-projects").
@@ -458,12 +461,12 @@ def search_notes(
     try:
         settings = get_settings()
         base_path = settings.obsidian_vault_path
-        
+
         if root_path:
             search_dir = base_path / root_path
         else:
             search_dir = base_path
-            
+
         if not search_dir.exists():
             return [f"Error: Path not found {root_path}"]
 
@@ -477,16 +480,16 @@ def search_notes(
         for item in search_dir.rglob("*.md"):
             # Create relative path string for matching
             rel_path = str(item.relative_to(base_path))
-            
+
             # Skip hidden folders/files
-            if "/." in str(item) or item.name.startswith('.'):
+            if "/." in str(item) or item.name.startswith("."):
                 continue
-            
+
             if regex.search(rel_path):
                 results.append(rel_path)
                 if len(results) >= max_results:
                     break
-        
+
         logger.info(f"Found {len(results)} matches for pattern '{pattern}'")
         return results
 
@@ -497,12 +500,11 @@ def search_notes(
 
 @mcp.tool()
 def get_vault_structure(
-    root_path: Optional[str] = None,
-    depth: int = 2
-) -> Dict[str, Any]:
+    root_path: str | None = None, depth: int = 2
+) -> dict[str, Any]:
     """
     Get a directory listing/tree of the vault.
-    
+
     Args:
         root_path: Relative path to start from (default: vault root).
         depth: Recursion depth (default: 2).
@@ -511,7 +513,7 @@ def get_vault_structure(
     try:
         settings = get_settings()
         base_path = settings.obsidian_vault_path
-        
+
         if root_path:
             target_path = base_path / root_path
         else:
@@ -522,25 +524,28 @@ def get_vault_structure(
 
         def build_tree(current_path: Any, current_depth: int) -> Any:
             if current_depth > depth:
-                return "..." # Truncate
+                return "..."  # Truncate
 
             tree = {}
             try:
                 # Iterate and sort: directories first, then files
-                items = sorted(list(current_path.iterdir()), key=lambda x: (not x.is_dir(), x.name.lower()))
-                
+                items = sorted(
+                    list(current_path.iterdir()),
+                    key=lambda x: (not x.is_dir(), x.name.lower()),
+                )
+
                 for item in items:
-                    if item.name.startswith('.'):
+                    if item.name.startswith("."):
                         continue
-                    
+
                     if item.is_dir():
                         tree[item.name] = build_tree(item, current_depth + 1)
-                    elif item.suffix == '.md':
+                    elif item.suffix == ".md":
                         tree[item.name] = "file"
-                
+
             except PermissionError:
                 return "ACCESS_DENIED"
-                
+
             return tree
 
         return build_tree(target_path, 0)
@@ -552,7 +557,7 @@ def get_vault_structure(
 
 if __name__ == "__main__":
     import sys
-    
+
     # Check for SSE mode (for persistent service)
     if "--sse" in sys.argv or os.environ.get("MCP_TRANSPORT") == "sse":
         logger.info("Starting SSE server on port 8765...")
