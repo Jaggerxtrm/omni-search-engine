@@ -4,28 +4,31 @@ Manual test script for the chunker.
 Tests with a real file from the vault.
 """
 
+import sys
 from pathlib import Path
-from chunker import MarkdownChunker
+
+# Add project root to sys.path
+sys.path.append(str(Path(__file__).parent.parent))
+
+from crawlers.markdown_crawler import MarkdownChunker
 
 # Test with a real file
-test_file = Path("/vault/1-projects/03_studio_insegnamento/trading/concetti-schemi/00_Master_Index.md")
+test_file = Path(
+    "/vault/1-projects/03_studio_insegnamento/trading/concetti-schemi/00_Master_Index.md"
+)
 
 if test_file.exists():
     print(f"Testing chunker with: {test_file.name}")
     print("=" * 80)
 
-    with open(test_file, 'r') as f:
+    with open(test_file) as f:
         content = f.read()
 
     print(f"File size: {len(content)} characters")
     print()
 
     # Create chunker
-    chunker = MarkdownChunker(
-        target_chunk_size=800,
-        max_chunk_size=1500,
-        min_chunk_size=100
-    )
+    chunker = MarkdownChunker(target_chunk_size=800, max_chunk_size=1500, min_chunk_size=100)
 
     # Chunk the content
     chunks = chunker.chunk_markdown(content)
@@ -57,13 +60,15 @@ if test_file.exists():
     if oversized:
         print(f"  ✗ WARNING: {len(oversized)} chunks exceed max size!")
     else:
-        print(f"  ✓ All chunks within max size (1500 tokens)")
+        print("  ✓ All chunks within max size (1500 tokens)")
 
     undersized = [c for c in chunks if c.token_count < 100]
     if undersized:
-        print(f"  ⚠ Note: {len(undersized)} chunks below min size (may be expected for small sections)")
+        print(
+            f"  ⚠ Note: {len(undersized)} chunks below min size (may be expected for small sections)"
+        )
     else:
-        print(f"  ✓ All chunks above min size (100 tokens)")
+        print("  ✓ All chunks above min size (100 tokens)")
 
 else:
     print(f"Test file not found: {test_file}")

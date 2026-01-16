@@ -8,7 +8,7 @@ Preserves header hierarchy as context and respects token size constraints.
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional, Tuple
+
 from utils import count_tokens, remove_frontmatter
 
 
@@ -27,6 +27,7 @@ class Chunk:
         folder: Parent folder path (set by indexer)
         tags: List of tags from note (set by indexer)
     """
+
     content: str
     chunk_index: int
     header_context: str
@@ -34,7 +35,7 @@ class Chunk:
     file_path: str = ""
     note_title: str = ""
     folder: str = ""
-    tags: List[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
 
 
 class MarkdownChunker:
@@ -54,7 +55,7 @@ class MarkdownChunker:
         target_chunk_size: int = 800,
         max_chunk_size: int = 1500,
         min_chunk_size: int = 100,
-        model: str = "text-embedding-3-small"
+        model: str = "text-embedding-3-small",
     ):
         """
         Initialize chunker with size constraints.
@@ -70,7 +71,7 @@ class MarkdownChunker:
         self.min_chunk_size = min_chunk_size
         self.model = model
 
-    def chunk_markdown(self, content: str) -> List[Chunk]:
+    def chunk_markdown(self, content: str) -> list[Chunk]:
         """
         Split markdown content into semantic chunks.
 
@@ -101,7 +102,7 @@ class MarkdownChunker:
 
         return chunks
 
-    def _split_by_headers(self, content: str) -> List[Tuple[str, str]]:
+    def _split_by_headers(self, content: str) -> list[tuple[str, str]]:
         """
         Split content by markdown headers, preserving hierarchy.
 
@@ -109,9 +110,9 @@ class MarkdownChunker:
             List of (header_context, content) tuples
         """
         # Pattern to match markdown headers
-        header_pattern = r'^(#{1,6})\s+(.+)$'
+        header_pattern = r"^(#{1,6})\s+(.+)$"
 
-        lines = content.split('\n')
+        lines = content.split("\n")
         sections = []
         current_section_lines = []
         header_stack = []  # Track hierarchy: [(level, title), ...]
@@ -123,7 +124,7 @@ class MarkdownChunker:
                 # Save previous section if it has content
                 if current_section_lines:
                     header_context = self._build_header_context(header_stack)
-                    section_content = '\n'.join(current_section_lines)
+                    section_content = "\n".join(current_section_lines)
                     sections.append((header_context, section_content))
                     current_section_lines = []
 
@@ -145,7 +146,7 @@ class MarkdownChunker:
         # Add final section
         if current_section_lines:
             header_context = self._build_header_context(header_stack)
-            section_content = '\n'.join(current_section_lines)
+            section_content = "\n".join(current_section_lines)
             sections.append((header_context, section_content))
 
         # If no headers found, treat entire content as one section
@@ -154,7 +155,7 @@ class MarkdownChunker:
 
         return sections
 
-    def _build_header_context(self, header_stack: List[Tuple[int, str]]) -> str:
+    def _build_header_context(self, header_stack: list[tuple[int, str]]) -> str:
         """
         Build full header hierarchy string from stack.
 
@@ -169,12 +170,12 @@ class MarkdownChunker:
 
         parts = []
         for level, title in header_stack:
-            prefix = '#' * level
+            prefix = "#" * level
             parts.append(f"{prefix} {title}")
 
         return " / ".join(parts)
 
-    def _process_section(self, section: Tuple[str, str]) -> List[Chunk]:
+    def _process_section(self, section: tuple[str, str]) -> list[Chunk]:
         """
         Process a section into chunks respecting size constraints.
 
@@ -194,12 +195,14 @@ class MarkdownChunker:
 
         # If section fits target size, return as-is
         if token_count <= self.target_chunk_size:
-            return [Chunk(
-                content=content,
-                chunk_index=0,  # Will be reassigned later
-                header_context=header_context,
-                token_count=token_count
-            )]
+            return [
+                Chunk(
+                    content=content,
+                    chunk_index=0,  # Will be reassigned later
+                    header_context=header_context,
+                    token_count=token_count,
+                )
+            ]
 
         # If section too large, split on paragraphs
         if token_count > self.target_chunk_size:
@@ -207,7 +210,7 @@ class MarkdownChunker:
 
         return []
 
-    def _split_by_paragraphs(self, header_context: str, content: str) -> List[Chunk]:
+    def _split_by_paragraphs(self, header_context: str, content: str) -> list[Chunk]:
         """
         Split content into chunks on paragraph boundaries.
 
@@ -219,7 +222,7 @@ class MarkdownChunker:
             List of chunks
         """
         # Split on double newlines (paragraph boundaries)
-        paragraphs = re.split(r'\n\s*\n', content)
+        paragraphs = re.split(r"\n\s*\n", content)
 
         chunks = []
         current_chunk_paragraphs = []
@@ -236,13 +239,15 @@ class MarkdownChunker:
             if para_tokens > self.max_chunk_size:
                 # Save current chunk if any
                 if current_chunk_paragraphs:
-                    chunk_content = '\n\n'.join(current_chunk_paragraphs)
-                    chunks.append(Chunk(
-                        content=chunk_content,
-                        chunk_index=0,
-                        header_context=header_context,
-                        token_count=current_token_count
-                    ))
+                    chunk_content = "\n\n".join(current_chunk_paragraphs)
+                    chunks.append(
+                        Chunk(
+                            content=chunk_content,
+                            chunk_index=0,
+                            header_context=header_context,
+                            token_count=current_token_count,
+                        )
+                    )
                     current_chunk_paragraphs = []
                     current_token_count = 0
 
@@ -256,13 +261,15 @@ class MarkdownChunker:
 
             if would_be_tokens > self.target_chunk_size and current_chunk_paragraphs:
                 # Save current chunk
-                chunk_content = '\n\n'.join(current_chunk_paragraphs)
-                chunks.append(Chunk(
-                    content=chunk_content,
-                    chunk_index=0,
-                    header_context=header_context,
-                    token_count=current_token_count
-                ))
+                chunk_content = "\n\n".join(current_chunk_paragraphs)
+                chunks.append(
+                    Chunk(
+                        content=chunk_content,
+                        chunk_index=0,
+                        header_context=header_context,
+                        token_count=current_token_count,
+                    )
+                )
                 # Start new chunk
                 current_chunk_paragraphs = [paragraph]
                 current_token_count = para_tokens
@@ -273,17 +280,19 @@ class MarkdownChunker:
 
         # Save final chunk
         if current_chunk_paragraphs:
-            chunk_content = '\n\n'.join(current_chunk_paragraphs)
-            chunks.append(Chunk(
-                content=chunk_content,
-                chunk_index=0,
-                header_context=header_context,
-                token_count=current_token_count
-            ))
+            chunk_content = "\n\n".join(current_chunk_paragraphs)
+            chunks.append(
+                Chunk(
+                    content=chunk_content,
+                    chunk_index=0,
+                    header_context=header_context,
+                    token_count=current_token_count,
+                )
+            )
 
         return chunks
 
-    def _split_by_sentences(self, header_context: str, content: str) -> List[Chunk]:
+    def _split_by_sentences(self, header_context: str, content: str) -> list[Chunk]:
         """
         Split content into chunks on sentence boundaries (last resort).
 
@@ -295,7 +304,7 @@ class MarkdownChunker:
             List of chunks
         """
         # Split on sentence boundaries (. ! ?) followed by space or newline
-        sentence_pattern = r'(?<=[.!?])\s+'
+        sentence_pattern = r"(?<=[.!?])\s+"
         sentences = re.split(sentence_pattern, content)
 
         chunks = []
@@ -313,13 +322,15 @@ class MarkdownChunker:
             if sent_tokens > self.max_chunk_size:
                 # Save current chunk if any
                 if current_chunk_sentences:
-                    chunk_content = ' '.join(current_chunk_sentences)
-                    chunks.append(Chunk(
-                        content=chunk_content,
-                        chunk_index=0,
-                        header_context=header_context,
-                        token_count=current_token_count
-                    ))
+                    chunk_content = " ".join(current_chunk_sentences)
+                    chunks.append(
+                        Chunk(
+                            content=chunk_content,
+                            chunk_index=0,
+                            header_context=header_context,
+                            token_count=current_token_count,
+                        )
+                    )
                     current_chunk_sentences = []
                     current_token_count = 0
 
@@ -332,13 +343,15 @@ class MarkdownChunker:
 
             if would_be_tokens > self.target_chunk_size and current_chunk_sentences:
                 # Save current chunk
-                chunk_content = ' '.join(current_chunk_sentences)
-                chunks.append(Chunk(
-                    content=chunk_content,
-                    chunk_index=0,
-                    header_context=header_context,
-                    token_count=current_token_count
-                ))
+                chunk_content = " ".join(current_chunk_sentences)
+                chunks.append(
+                    Chunk(
+                        content=chunk_content,
+                        chunk_index=0,
+                        header_context=header_context,
+                        token_count=current_token_count,
+                    )
+                )
                 # Start new chunk
                 current_chunk_sentences = [sentence]
                 current_token_count = sent_tokens
@@ -349,17 +362,19 @@ class MarkdownChunker:
 
         # Save final chunk
         if current_chunk_sentences:
-            chunk_content = ' '.join(current_chunk_sentences)
-            chunks.append(Chunk(
-                content=chunk_content,
-                chunk_index=0,
-                header_context=header_context,
-                token_count=current_token_count
-            ))
+            chunk_content = " ".join(current_chunk_sentences)
+            chunks.append(
+                Chunk(
+                    content=chunk_content,
+                    chunk_index=0,
+                    header_context=header_context,
+                    token_count=current_token_count,
+                )
+            )
 
         return chunks
 
-    def _hard_split(self, header_context: str, content: str) -> List[Chunk]:
+    def _hard_split(self, header_context: str, content: str) -> list[Chunk]:
         """
         Hard split content at max_chunk_size (absolute last resort).
 
@@ -381,13 +396,15 @@ class MarkdownChunker:
 
             if would_be_tokens > self.max_chunk_size and current_chunk_words:
                 # Save current chunk
-                chunk_content = ' '.join(current_chunk_words)
-                chunks.append(Chunk(
-                    content=chunk_content,
-                    chunk_index=0,
-                    header_context=header_context,
-                    token_count=current_token_count
-                ))
+                chunk_content = " ".join(current_chunk_words)
+                chunks.append(
+                    Chunk(
+                        content=chunk_content,
+                        chunk_index=0,
+                        header_context=header_context,
+                        token_count=current_token_count,
+                    )
+                )
                 # Start new chunk
                 current_chunk_words = [word]
                 current_token_count = word_tokens
@@ -397,17 +414,19 @@ class MarkdownChunker:
 
         # Save final chunk
         if current_chunk_words:
-            chunk_content = ' '.join(current_chunk_words)
-            chunks.append(Chunk(
-                content=chunk_content,
-                chunk_index=0,
-                header_context=header_context,
-                token_count=current_token_count
-            ))
+            chunk_content = " ".join(current_chunk_words)
+            chunks.append(
+                Chunk(
+                    content=chunk_content,
+                    chunk_index=0,
+                    header_context=header_context,
+                    token_count=current_token_count,
+                )
+            )
 
         return chunks
 
-    def _merge_small_chunks(self, chunks: List[Chunk]) -> List[Chunk]:
+    def _merge_small_chunks(self, chunks: list[Chunk]) -> list[Chunk]:
         """
         Merge consecutive chunks that are below min_chunk_size.
 
@@ -440,7 +459,7 @@ class MarkdownChunker:
                     file_path=current_chunk.file_path,
                     note_title=current_chunk.note_title,
                     folder=current_chunk.folder,
-                    tags=current_chunk.tags
+                    tags=current_chunk.tags,
                 )
             else:
                 # Can't merge, save current and move to next
@@ -462,8 +481,8 @@ def chunk_markdown_file(
     target_chunk_size: int = 800,
     max_chunk_size: int = 1500,
     min_chunk_size: int = 100,
-    model: str = "text-embedding-3-small"
-) -> List[Chunk]:
+    model: str = "text-embedding-3-small",
+) -> list[Chunk]:
     """
     Convenience function to chunk a markdown file.
 
@@ -484,14 +503,14 @@ def chunk_markdown_file(
     if not file_path.exists():
         raise FileNotFoundError(f"File not found: {file_path}")
 
-    with open(file_path, 'r', encoding='utf-8') as f:
+    with open(file_path, encoding="utf-8") as f:
         content = f.read()
 
     chunker = MarkdownChunker(
         target_chunk_size=target_chunk_size,
         max_chunk_size=max_chunk_size,
         min_chunk_size=min_chunk_size,
-        model=model
+        model=model,
     )
 
     return chunker.chunk_markdown(content)

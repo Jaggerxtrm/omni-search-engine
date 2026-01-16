@@ -6,7 +6,8 @@ and managing metadata. Provides methods for incremental updates and orphan clean
 """
 
 from pathlib import Path
-from typing import List, Dict, Any, Optional, Set
+from typing import Any
+
 import chromadb
 from chromadb.config import Settings
 
@@ -22,11 +23,7 @@ class VectorStore:
     - File path-based operations for updates and cleanup
     """
 
-    def __init__(
-        self,
-        persist_directory: str,
-        collection_name: str = "obsidian_notes"
-    ):
+    def __init__(self, persist_directory: str, collection_name: str = "obsidian_notes"):
         """
         Initialize vector store with persistent ChromaDB.
 
@@ -43,24 +40,21 @@ class VectorStore:
         # Initialize ChromaDB client
         self.client = chromadb.PersistentClient(
             path=str(self.persist_directory),
-            settings=Settings(
-                anonymized_telemetry=False,
-                allow_reset=True
-            )
+            settings=Settings(anonymized_telemetry=False, allow_reset=True),
         )
 
         # Get or create collection
         self.collection = self.client.get_or_create_collection(
             name=self.collection_name,
-            metadata={"hnsw:space": "cosine"}  # Use cosine similarity
+            metadata={"hnsw:space": "cosine"},  # Use cosine similarity
         )
 
     def add_chunks(
         self,
-        embeddings: List[List[float]],
-        documents: List[str],
-        metadatas: List[Dict[str, Any]],
-        ids: List[str]
+        embeddings: list[list[float]],
+        documents: list[str],
+        metadatas: list[dict[str, Any]],
+        ids: list[str],
     ) -> None:
         """
         Add chunks with embeddings to the vector store.
@@ -97,18 +91,12 @@ class VectorStore:
             processed_metadatas.append(processed)
 
         self.collection.add(
-            embeddings=embeddings,
-            documents=documents,
-            metadatas=processed_metadatas,
-            ids=ids
+            embeddings=embeddings, documents=documents, metadatas=processed_metadatas, ids=ids
         )
 
     def query(
-        self,
-        query_embedding: List[float],
-        n_results: int = 5,
-        where: Optional[Dict[str, Any]] = None
-    ) -> Dict[str, Any]:
+        self, query_embedding: list[float], n_results: int = 5, where: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """
         Query vector store for similar chunks.
 
@@ -121,20 +109,18 @@ class VectorStore:
             Dict with keys: 'ids', 'documents', 'metadatas', 'distances'
         """
         results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n_results,
-            where=where
+            query_embeddings=[query_embedding], n_results=n_results, where=where
         )
 
         # Flatten results (query returns list of lists)
         return {
-            'ids': results['ids'][0] if results['ids'] else [],
-            'documents': results['documents'][0] if results['documents'] else [],
-            'metadatas': results['metadatas'][0] if results['metadatas'] else [],
-            'distances': results['distances'][0] if results['distances'] else []
+            "ids": results["ids"][0] if results["ids"] else [],
+            "documents": results["documents"][0] if results["documents"] else [],
+            "metadatas": results["metadatas"][0] if results["metadatas"] else [],
+            "distances": results["distances"][0] if results["distances"] else [],
         }
 
-    def get_by_file_path(self, file_path: str) -> Dict[str, Any]:
+    def get_by_file_path(self, file_path: str) -> dict[str, Any]:
         """
         Retrieve all chunks for a specific file.
 
@@ -145,18 +131,17 @@ class VectorStore:
             Dict with keys: 'ids', 'documents', 'metadatas'
         """
         results = self.collection.get(
-            where={"file_path": file_path},
-            include=["embeddings", "documents", "metadatas"]
+            where={"file_path": file_path}, include=["embeddings", "documents", "metadatas"]
         )
 
         return {
-            'ids': results['ids'],
-            'documents': results['documents'],
-            'metadatas': results['metadatas'],
-            'embeddings': results['embeddings']
+            "ids": results["ids"],
+            "documents": results["documents"],
+            "metadatas": results["metadatas"],
+            "embeddings": results["embeddings"],
         }
 
-    def check_content_hash(self, file_path: str) -> Optional[str]:
+    def check_content_hash(self, file_path: str) -> str | None:
         """
         Check if file exists in index and return its stored content hash.
 
@@ -166,13 +151,10 @@ class VectorStore:
         Returns:
             Content hash string if file exists, None otherwise
         """
-        results = self.collection.get(
-            where={"file_path": file_path},
-            limit=1
-        )
+        results = self.collection.get(where={"file_path": file_path}, limit=1)
 
-        if results['metadatas']:
-            return results['metadatas'][0].get('content_hash')
+        if results["metadatas"]:
+            return results["metadatas"][0].get("content_hash")
         return None
 
     def delete_by_file_path(self, file_path: str) -> None:
@@ -183,14 +165,12 @@ class VectorStore:
             file_path: Relative file path in vault
         """
         # Get all chunk IDs for this file
-        results = self.collection.get(
-            where={"file_path": file_path}
-        )
+        results = self.collection.get(where={"file_path": file_path})
 
-        if results['ids']:
-            self.collection.delete(ids=results['ids'])
+        if results["ids"]:
+            self.collection.delete(ids=results["ids"])
 
-    def get_all_file_paths(self) -> Set[str]:
+    def get_all_file_paths(self) -> set[str]:
         """
         Get set of all file paths currently in the index.
 
@@ -202,13 +182,13 @@ class VectorStore:
 
         # Extract unique file paths from metadata
         file_paths = set()
-        for metadata in results['metadatas']:
-            if 'file_path' in metadata:
-                file_paths.add(metadata['file_path'])
+        for metadata in results["metadatas"]:
+            if "file_path" in metadata:
+                file_paths.add(metadata["file_path"])
 
         return file_paths
 
-    def get_stats(self) -> Dict[str, Any]:
+    def get_stats(self) -> dict[str, Any]:
         """
         Get statistics about the vector store.
 
@@ -217,17 +197,17 @@ class VectorStore:
         """
         # Count total chunks
         all_data = self.collection.get()
-        total_chunks = len(all_data['ids'])
+        total_chunks = len(all_data["ids"])
 
         # Count unique files
         file_paths = self.get_all_file_paths()
         total_files = len(file_paths)
 
         return {
-            'total_chunks': total_chunks,
-            'total_files': total_files,
-            'collection_name': self.collection_name,
-            'persist_directory': str(self.persist_directory)
+            "total_chunks": total_chunks,
+            "total_files": total_files,
+            "collection_name": self.collection_name,
+            "persist_directory": str(self.persist_directory),
         }
 
     def reset(self) -> None:
@@ -238,14 +218,12 @@ class VectorStore:
         """
         self.client.delete_collection(name=self.collection_name)
         self.collection = self.client.get_or_create_collection(
-            name=self.collection_name,
-            metadata={"hnsw:space": "cosine"}
+            name=self.collection_name, metadata={"hnsw:space": "cosine"}
         )
 
 
 def create_vector_store(
-    persist_directory: str,
-    collection_name: str = "obsidian_notes"
+    persist_directory: str, collection_name: str = "obsidian_notes"
 ) -> VectorStore:
     """
     Convenience function to create a vector store.
@@ -257,7 +235,4 @@ def create_vector_store(
     Returns:
         Configured VectorStore instance
     """
-    return VectorStore(
-        persist_directory=persist_directory,
-        collection_name=collection_name
-    )
+    return VectorStore(persist_directory=persist_directory, collection_name=collection_name)

@@ -3,7 +3,13 @@
 Test chunker with inline markdown content.
 """
 
-from chunker import MarkdownChunker
+import sys
+from pathlib import Path
+
+# Add project root to sys.path
+sys.path.append(str(Path(__file__).parent.parent))
+
+from crawlers.markdown_crawler import MarkdownChunker
 
 # Test markdown content with headers
 test_content = """---
@@ -74,7 +80,7 @@ print()
 chunker = MarkdownChunker(
     target_chunk_size=150,  # Smaller for test visibility
     max_chunk_size=300,
-    min_chunk_size=50
+    min_chunk_size=50,
 )
 
 # Chunk the content
@@ -85,12 +91,12 @@ print()
 
 # Display each chunk
 for i, chunk in enumerate(chunks):
-    print(f"{'='*80}")
+    print(f"{'=' * 80}")
     print(f"Chunk {i}:")
     print(f"  Header Context: {chunk.header_context or '(no header)'}")
     print(f"  Token Count: {chunk.token_count}")
     print(f"  Content Length: {len(chunk.content)} chars")
-    print(f"\nContent:")
+    print("\nContent:")
     print(f"{chunk.content[:200]}...")
     print()
 
@@ -113,13 +119,13 @@ if oversized:
     for c in oversized:
         print(f"    - {c.token_count} tokens in '{c.header_context}'")
 else:
-    print(f"  ✓ All chunks within max size")
+    print("  ✓ All chunks within max size")
 
 undersized = [c for c in chunks if c.token_count < 50]
 if undersized:
     print(f"  ⚠ {len(undersized)} chunks below min size (50)")
 else:
-    print(f"  ✓ All chunks above min size")
+    print("  ✓ All chunks above min size")
 
 # Check header preservation
 print()

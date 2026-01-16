@@ -1,6 +1,7 @@
 import logging
-import sys
 import os
+import sys
+
 
 def setup_logging():
     """
@@ -13,8 +14,7 @@ def setup_logging():
 
     # Create formatter
     formatter = logging.Formatter(
-        fmt="[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S"
+        fmt="[%(asctime)s] [%(levelname)s] [%(name)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
     )
 
     # Configure root logger
@@ -37,6 +37,7 @@ def setup_logging():
         logging.getLogger("watchdog").setLevel(logging.WARNING)
 
     return root_logger
+
 
 def get_logger(name: str) -> logging.Logger:
     """

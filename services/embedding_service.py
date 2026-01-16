@@ -5,10 +5,9 @@ Integrates with OpenAI API to generate embeddings for text chunks.
 Implements batch processing and exponential backoff retry logic.
 """
 
-import time
-from typing import List
-from openai import OpenAI
-from openai import APIError, RateLimitError, APIConnectionError
+import asyncio
+
+from openai import APIConnectionError, APIError, AsyncOpenAI, RateLimitError
 
 
 class EmbeddingService:
@@ -27,7 +26,7 @@ class EmbeddingService:
         model: str = "text-embedding-3-small",
         batch_size: int = 100,
         max_retries: int = 3,
-        initial_retry_delay: float = 2.0
+        initial_retry_delay: float = 2.0,
     ):
         """
         Initialize embedding service.
@@ -39,13 +38,13 @@ class EmbeddingService:
             max_retries: Maximum retry attempts on failure
             initial_retry_delay: Initial delay in seconds for exponential backoff
         """
-        self.client = OpenAI(api_key=api_key)
+        self.client = AsyncOpenAI(api_key=api_key)
         self.model = model
         self.batch_size = batch_size
         self.max_retries = max_retries
         self.initial_retry_delay = initial_retry_delay
 
-    def embed_texts(self, texts: List[str]) -> List[List[float]]:
+    async def embed_texts(self, texts: list[str]) -> list[list[float]]:
         """
         Generate embeddings for a list of texts.
 
@@ -68,13 +67,13 @@ class EmbeddingService:
 
         # Process in batches
         for i in range(0, len(texts), self.batch_size):
-            batch = texts[i:i + self.batch_size]
-            batch_embeddings = self._embed_batch_with_retry(batch)
+            batch = texts[i : i + self.batch_size]
+            batch_embeddings = await self._embed_batch_with_retry(batch)
             all_embeddings.extend(batch_embeddings)
 
         return all_embeddings
 
-    def embed_single(self, text: str) -> List[float]:
+    async def embed_single(self, text: str) -> list[float]:
         """
         Generate embedding for a single text.
 
@@ -87,10 +86,10 @@ class EmbeddingService:
         Raises:
             OpenAIError: If all retry attempts fail
         """
-        embeddings = self.embed_texts([text])
+        embeddings = await self.embed_texts([text])
         return embeddings[0]
 
-    def _embed_batch_with_retry(self, texts: List[str]) -> List[List[float]]:
+    async def _embed_batch_with_retry(self, texts: list[str]) -> list[list[float]]:
         """
         Embed a batch of texts with exponential backoff retry logic.
 
@@ -103,34 +102,44 @@ class EmbeddingService:
         Raises:
             OpenAIError: If all retry attempts fail
         """
-        last_error = None
+        last_error: Exception | None = None
 
         for attempt in range(self.max_retries):
             try:
-                return self._embed_batch(texts)
+                return await self._embed_batch(texts)
 
             except RateLimitError as e:
                 last_error = e
                 if attempt < self.max_retries - 1:
-                    delay = self.initial_retry_delay * (2 ** attempt)
-                    print(f"Rate limit hit. Retrying in {delay}s... (attempt {attempt + 1}/{self.max_retries})")
-                    time.sleep(delay)
+                    delay = self.initial_retry_delay * (2**attempt)
+                    print(
+                        f"Rate limit hit. Retrying in {delay}s... "
+                        f"(attempt {attempt + 1}/{self.max_retries})"
+                    )
+                    await asyncio.sleep(delay)
 
             except APIConnectionError as e:
                 last_error = e
                 if attempt < self.max_retries - 1:
-                    delay = self.initial_retry_delay * (2 ** attempt)
-                    print(f"Connection error. Retrying in {delay}s... (attempt {attempt + 1}/{self.max_retries})")
-                    time.sleep(delay)
+                    delay = self.initial_retry_delay * (2**attempt)
+                    print(
+                        f"Connection error. Retrying in {delay}s... "
+                        f"(attempt {attempt + 1}/{self.max_retries})"
+                    )
+                    await asyncio.sleep(delay)
 
             except APIError as e:
                 last_error = e
                 # Don't retry on client errors (4xx), only server errors (5xx)
-                if e.status_code and 500 <= e.status_code < 600:
+                status_code = getattr(e, "status_code", None)
+                if status_code and 500 <= status_code < 600:
                     if attempt < self.max_retries - 1:
-                        delay = self.initial_retry_delay * (2 ** attempt)
-                        print(f"Server error {e.status_code}. Retrying in {delay}s... (attempt {attempt + 1}/{self.max_retries})")
-                        time.sleep(delay)
+                        delay = self.initial_retry_delay * (2**attempt)
+                        print(
+                            f"Server error {status_code}. Retrying in {delay}s... "
+                            f"(attempt {attempt + 1}/{self.max_retries})"
+                        )
+                        await asyncio.sleep(delay)
                     else:
                         raise
                 else:
@@ -143,7 +152,7 @@ class EmbeddingService:
         else:
             raise RuntimeError("Failed to embed batch after all retries")
 
-    def _embed_batch(self, texts: List[str]) -> List[List[float]]:
+    async def _embed_batch(self, texts: list[str]) -> list[list[float]]:
         """
         Call OpenAI API to embed a batch of texts (no retry logic).
 
@@ -156,17 +165,14 @@ class EmbeddingService:
         Raises:
             OpenAIError: On API errors
         """
-        response = self.client.embeddings.create(
-            input=texts,
-            model=self.model
-        )
+        response = await self.client.embeddings.create(input=texts, model=self.model)
 
         # Extract embeddings in order
         embeddings = [item.embedding for item in response.data]
 
         return embeddings
 
-    def get_embedding_dimension(self) -> int:
+    async def get_embedding_dimension(self) -> int:
         """
         Get the dimensionality of embeddings from this model.
 
@@ -177,14 +183,12 @@ class EmbeddingService:
             OpenAIError: If test embedding fails
         """
         # Generate a test embedding to determine dimensions
-        test_embedding = self.embed_single("test")
+        test_embedding = await self.embed_single("test")
         return len(test_embedding)
 
 
 def create_embedding_service(
-    api_key: str,
-    model: str = "text-embedding-3-small",
-    batch_size: int = 100
+    api_key: str, model: str = "text-embedding-3-small", batch_size: int = 100
 ) -> EmbeddingService:
     """
     Convenience function to create an embedding service.
@@ -197,8 +201,4 @@ def create_embedding_service(
     Returns:
         Configured EmbeddingService instance
     """
-    return EmbeddingService(
-        api_key=api_key,
-        model=model,
-        batch_size=batch_size
-    )
+    return EmbeddingService(api_key=api_key, model=model, batch_size=batch_size)
