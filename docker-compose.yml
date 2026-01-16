@@ -1,0 +1,24 @@
+services:
+  obsidian-search:
+    build: .
+    container_name: obsidian_search_mcp
+    environment:
+      - OPENAI_API_KEY
+      - CONFIG_PATH=/app/config.yaml
+      - WATCH_MODE
+    volumes:
+      # Mount the vault (Ready-only bind mount)
+      - ${VAULT_PATH:-/home/user/vault}:/vault:ro,Z
+      # Persist ChromaDB data (Named volume)
+      - chroma_data:/data
+    # Keep stdin open for MCP communication if needed
+    stdin_open: true
+    tty: false
+    
+    # Enable SSE mode
+    command: ["python", "server.py", "--sse"]
+    ports:
+      - "8765:8765"
+
+volumes:
+  chroma_data:
