@@ -135,7 +135,7 @@ def index_note(note_path: str) -> Dict[str, Any]:
 
 ---
 
-### Priority 2: Link Deduplication (Native ChromaDB)
+### Priority 2: Link Deduplication (Native ChromaDB) ✅ COMPLETE
 
 **Goal:** Prevent `suggest_links` from suggesting notes that are *already linked* in the source note.
 
@@ -145,9 +145,9 @@ def index_note(note_path: str) -> Dict[str, Any]:
 - Search shouldn't suggest `Note B` again.
 
 **Implementation:**
-- **Extractor:** Parse wikilinks `[[...]]` during indexing (`services/indexer_service.py`).
+- **Extractor:** Parse wikilinks `[[...]]` during indexing (`utils.py`).
 - **Storage:** Save `outbound_links` list in ChromaDB metadata.
-- **Filter:** In `suggest_links`, retrieve `outbound_links` and exclude those IDs from results.
+- **Filter:** In `suggest_links`, retrieve `outbound_links` from source content and exclude those IDs from results.
 
 **Complexity:** Medium (2 hours)
 **Dependencies:** None (uses existing metadata)
