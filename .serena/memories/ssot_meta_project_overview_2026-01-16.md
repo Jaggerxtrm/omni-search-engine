@@ -7,6 +7,7 @@ category: meta
 subcategory: overview
 domain: [meta, documentation]
 changelog:
+  - 0.3.0 (2026-01-16): Added Enhanced Chunking capability
   - 0.2.0 (2026-01-16): Updated with Async architecture and CI/CD details
   - 0.1.0 (2026-01-16): Initial overview based on README and codebase analysis
 ---
@@ -21,6 +22,7 @@ To provide an "agent-first" semantic search system for Obsidian vaults, enabling
 4. **Efficiency**: Incremental indexing using content hashing to minimize API costs.
 5. **Deployment**: Containerized, modular architecture for ease of use.
 6. **Code Quality**: Enforced by strict CI pipeline (MyPy, Ruff).
+7. **Enhanced Chunking**: Context-aware splitting preserves code blocks and tables.
 
 ## Technical Stack
 - **Language**: Python 3.13+ (AsyncIO)

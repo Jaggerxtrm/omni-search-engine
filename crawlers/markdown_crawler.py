@@ -320,39 +320,37 @@ class MarkdownChunker:
         Returns:
             List of paragraph strings
         """
-        # Regex for fenced code blocks
-        code_block_pattern = r"(```[\s\S]*?```)"
+        # Regex for fenced code blocks with backreference to handle 3+ ticks
+        # Captures: 1. Full Block, 2. Delimiter
+        # This ensures we match nested blocks correctly (e.g. 4 ticks wrapping 3 ticks)
+        code_block_pattern = r"((`{3,})[\s\S]*?\2)"
         
-        # Regex for tables (simplified: lines starting with | and ending with | or similar)
-        # We'll use a slightly more robust pattern that captures contiguous lines of table-like text
-        # But for now, let's focus on identifying the block.
-        # Table pattern: Start of line, pipe, content... end of line. Repeated.
-        # This is tricky with regex.
-        # Alternative: We split by code blocks first. Then within non-code, we check for tables?
-        # Let's stick to the code block pattern first as it's the primary failure mode.
-        
-        # Split by code blocks, capturing the delimiters
-        # This returns [text, code_block, text, code_block...]
+        # parts will be [text, FULL_BLOCK, DELIMIT, text, FULL_BLOCK, DELIMIT...]
         parts = re.split(code_block_pattern, content)
         
         logical_paragraphs = []
         
-        for part in parts:
-            if not part.strip():
-                continue
-                
-            if part.strip().startswith("```"):
-                # This is a code block, treat as one paragraph
-                logical_paragraphs.append(part.strip())
-            else:
+        # Iterate manually to handle the capturing groups structure
+        i = 0
+        while i < len(parts):
+            text_part = parts[i]
+            if text_part.strip():
                 # This is normal text (potentially containing tables)
-                # For tables, standard paragraph splitting (\n\n) usually keeps them together 
-                # because tables don't have blank lines inside.
-                # So we just apply standard splitting here.
-                sub_paragraphs = re.split(r"\n\s*\n", part)
+                sub_paragraphs = re.split(r"\n\s*\n", text_part)
                 for sub in sub_paragraphs:
                     if sub.strip():
                         logical_paragraphs.append(sub.strip())
+            
+            # Check if there is a block following
+            if i + 1 < len(parts):
+                block_part = parts[i+1]
+                # delimiter_part = parts[i+2] (We ignore this)
+                if block_part.strip():
+                    logical_paragraphs.append(block_part.strip())
+                
+                i += 3 # Skip text, block, delim
+            else:
+                i += 1
                         
         return logical_paragraphs
 

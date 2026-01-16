@@ -121,7 +121,7 @@ class VaultIndexer:
                         continue
 
                 # Index the file
-                chunks_count = await self.index_single_file(file_path)
+                chunks_count = await self.index_single_file(file_path, force=force)
                 logger.info(f"  ✓ Indexed {relative_path} ({chunks_count} chunks)")
                 result.notes_processed += 1
                 result.chunks_created += chunks_count
@@ -191,7 +191,7 @@ class VaultIndexer:
         # Skip if hashes match
         return current_hash == stored_hash
 
-    async def index_single_file(self, file_path: Path) -> int:
+    async def index_single_file(self, file_path: Path, force: bool = False) -> int:
         """
         Index a single markdown file.
 
@@ -209,10 +209,11 @@ class VaultIndexer:
         current_hash = compute_content_hash(content)
         relative_path = get_relative_path(file_path, self.vault_path)
 
-        stored_hash = self.vector_store.check_content_hash(relative_path)
-        if stored_hash == current_hash:
-            logger.debug(f"Skipping unchanged file: {relative_path}")
-            return 0
+        if not force:
+            saved_hash = self.vector_store.check_content_hash(relative_path)
+            if saved_hash == current_hash:
+                logger.debug(f"Skipping unchanged file: {relative_path}")
+                return 0
 
         logger.info(f"Indexing file: {relative_path}")
 

@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Configuration**: Pydantic-based settings management via `.env` file.
 - **Documentation**: Comprehensive `README.md`, `USAGE.md`, and `ROADMAP.md`.
 - **SSOT Documentation**: Initial set of Single Source of Truth architecture documents in `.serena/memories/`.
+- **Enhanced Chunking**: Context-aware splitting algorithm that preserves code blocks (` ```...``` `) and markdown tables as atomic units.
 
 ### Changed
 - Refactored monolithic script into a modular service-oriented architecture (`services/`, `repositories/`, `dependencies.py`).
