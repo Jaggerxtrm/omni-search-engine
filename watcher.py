@@ -12,8 +12,8 @@ from typing import Optional
 from watchdog.observers import Observer
 from watchdog.events import FileSystemEventHandler, FileSystemEvent
 
-from indexer import VaultIndexer
-from vector_store import VectorStore
+from services.indexer_service import VaultIndexer
+from repositories.snippet_repository import VectorStore
 from utils import get_relative_path
 from logger import get_logger
 

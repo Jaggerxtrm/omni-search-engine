@@ -1,16 +1,17 @@
 services:
-  obsidian-search:
+  omni-search-engine:
     build: .
-    container_name: obsidian_search_mcp
+    container_name: omni-search-engine
     environment:
       - OPENAI_API_KEY
-      - CONFIG_PATH=/app/config.yaml
+      - OBSIDIAN_VAULT_PATH=/vault
+      - CHROMADB_PATH=/data/chromadb
       - WATCH_MODE
     volumes:
-      # Mount the vault (Ready-only bind mount)
+      # Mount the vault (Read-only bind mount)
       - ${VAULT_PATH:-/home/user/vault}:/vault:ro,Z
       # Persist ChromaDB data (Named volume)
-      - chroma_data:/data
+      - chroma_data:/data/chromadb
     # Keep stdin open for MCP communication if needed
     stdin_open: true
     tty: false

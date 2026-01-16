@@ -1,38 +1,28 @@
-from typing import Optional
 from pathlib import Path
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing import Optional
 from pydantic import Field
-
-class ChunkingSettings(BaseSettings):
-    target_chunk_size: int = 800
-    max_chunk_size: int = 1500
-    min_chunk_size: int = 100
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class EmbeddingSettings(BaseSettings):
-    model: str = "text-embedding-3-small"
-    batch_size: int = 100
-    openai_api_key: Optional[str] = Field(None, alias="OPENAI_API_KEY")
+    openai_api_key: str = Field(..., alias="OPENAI_API_KEY")
+    model: str = Field("text-embedding-3-small", alias="EMBEDDING_MODEL")
+    batch_size: int = Field(100, alias="EMBEDDING_BATCH_SIZE")
 
-class SearchSettings(BaseSettings):
-    default_n_results: int = 5
-    similarity_threshold: float = 0.7
+class ChunkingSettings(BaseSettings):
+    target_chunk_size: int = Field(1000, alias="TARGET_CHUNK_SIZE")
+    max_chunk_size: int = Field(2000, alias="MAX_CHUNK_SIZE")
+    min_chunk_size: int = Field(100, alias="MIN_CHUNK_SIZE")
 
 class Settings(BaseSettings):
-    # Vault Paths
-    obsidian_vault_path: Path = Field(default=Path("/vault"), alias="OBSIDIAN_VAULT_PATH")
-    chromadb_path: Path = Field(default=Path("/data/chromadb"), alias="CHROMADB_PATH")
+    obsidian_vault_path: Path = Field(..., alias="OBSIDIAN_VAULT_PATH")
+    chromadb_path: Path = Field(Path("chroma_db"), alias="CHROMADB_PATH")
     
-    # Sub-configs
-    chunking: ChunkingSettings = ChunkingSettings()
-    embedding: EmbeddingSettings = EmbeddingSettings()
-    search: SearchSettings = SearchSettings()
-
-    # Logging
-    log_level: str = Field("INFO", alias="LOG_LEVEL")
+    embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
+    chunking: ChunkingSettings = Field(default_factory=ChunkingSettings)
 
     model_config = SettingsConfigDict(
         env_file=".env",
-        env_nested_delimiter="__",
+        env_file_encoding="utf-8",
         extra="ignore"
     )
 

@@ -9,9 +9,9 @@ import time
 from pathlib import Path
 from dataclasses import dataclass, field
 from typing import List
-from chunker import MarkdownChunker
-from embeddings import EmbeddingService
-from vector_store import VectorStore
+from crawlers.markdown_crawler import MarkdownChunker
+from services.embedding_service import EmbeddingService
+from repositories.snippet_repository import VectorStore
 from utils import (
     compute_content_hash,
     get_relative_path,

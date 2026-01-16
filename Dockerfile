@@ -12,8 +12,18 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY *.py .
-COPY config.yaml .
+# Copy application code structure
+COPY api/ ./api/
+COPY crawlers/ ./crawlers/
+COPY models/ ./models/
+COPY repositories/ ./repositories/
+COPY services/ ./services/
+COPY dependencies.py .
+COPY settings.py .
+COPY server.py .
+COPY logger.py .
+COPY utils.py .
+COPY watcher.py .
 
 # Create directory for ChromaDB data
 RUN mkdir -p /data/chromadb

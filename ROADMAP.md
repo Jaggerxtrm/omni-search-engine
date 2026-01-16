@@ -13,7 +13,24 @@ All milestones complete. See README for details.
 ---
 
 ## Phase 2: Enhancements
-****
+
+### Priority 0: Robustness & Infrastructure ✅ COMPLETE
+
+**Goal:** Ensure server stability, observability, and efficiency.
+
+**Implemented:**
+- **Graceful Shutdown:** `lifespan` manager ensures clean exit without hanging threads.
+- **Centralized Logging:** JSON/Structured logs via `logger.py` replaced `print`.
+    - **Smart Hash Check:** Skips re-embedding if content hash (SHA256) matches, even if file touched.
+    - **Coalescing Watcher:** "Trailing edge" debounce (default 30s) prevents redundant indexing during atomic saves or active typing.
+    - **Configuration:** `DEBOUNCE_SECONDS` added to `.env`.
+- **Architectural Refactoring:**
+    - **Modular Structure:** Separated concerns into `services`, `repositories`, `crawlers`, `api`.
+    - **Dependency Injection:** Centralized service instantiation in `dependencies.py` with `lru_cache`.
+    - **Pydantic Configuration:** Strongly typed settings validation in `settings.py`.
+
+---
+
 ### Priority 1: `suggest_links` Tool ✅ COMPLETE
 
 **Goal:** Automatically suggest related notes to link together based on semantic similarity.
@@ -128,7 +145,7 @@ def index_note(note_path: str) -> Dict[str, Any]:
 - Search shouldn't suggest `Note B` again.
 
 **Implementation:**
-- **Extractor:** Parse wikilinks `[[...]]` during indexing (`indexer.py`).
+- **Extractor:** Parse wikilinks `[[...]]` during indexing (`services/indexer_service.py`).
 - **Storage:** Save `outbound_links` list in ChromaDB metadata.
 - **Filter:** In `suggest_links`, retrieve `outbound_links` and exclude those IDs from results.
 
@@ -137,7 +154,7 @@ def index_note(note_path: str) -> Dict[str, Any]:
 
 ---
 
-### Priority 3: `get_vault_structure` Tool (Serena-inspired)
+### Priority 3: `get_vault_structure` Tool (Serena-inspired) ✅ COMPLETE
 
 **Goal:** Allow the agent to explore the vault folder structure recursively.
 
@@ -172,7 +189,7 @@ def index_note(note_path: str) -> Dict[str, Any]:
 - **Benfits:** Zero API cost for offline reorganization.
 
 **Complexity:** Medium (2 hours)
-**Dependencies:** Global hash lookup in `vector_store.py`.
+**Dependencies:** Global hash lookup in `repositories/snippet_repository.py`.
 
 ---
 
@@ -187,7 +204,7 @@ def index_note(note_path: str) -> Dict[str, Any]:
 
 **Implementation:**
 
-1. **Modify `chunker.py`:**
+1. **Modify `crawlers/markdown_crawler.py`:**
    - Add code block detection: `` ```language ... ``` ``
    - Add table detection: `| col1 | col2 |`
    - Never split within these boundaries
@@ -212,7 +229,7 @@ table_pattern = r'^\|.+\|$'  # Multiline with M flag
 
 **Complexity:** Medium (3-4 hours)
 **Dependencies:** None
-**Files to modify:** `chunker.py`
+**Files to modify:** `crawlers/markdown_crawler.py`
 **Testing:** Update `test_chunker_inline.py` with code block examples
 
 ---
@@ -285,10 +302,25 @@ file_watcher:
 - Batching: Group multiple changes
 - Performance: Don't impact Obsidian performance
 - Container: May need host filesystem access
+**Status:** ✅ COMPLETE
+- **Implementation:** `watcher.py` uses `watchdog`.
+- **Optimization:** strict file filtering + Coalescing Debounce (30s).
+- **Control:** `WATCH_MODE=true` env var.
 
 ---
 
 ### Priority 5: Analytics Tools
+
+**Goal:** Provide insights about vault structure and content relationships.
+
+#### 5a. `search_notes` Tool ✅ COMPLETE
+
+**Goal:** Find notes by regex/substring.
+**Tool:** `search_notes(pattern: str, root_path: Optional[str])`
+**Implementation:** `server.py` regex match on file paths.
+
+#### 5b. Future Analytics (Planned)
+
 
 **Goal:** Provide insights about vault structure and content relationships.
 

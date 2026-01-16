@@ -6,99 +6,50 @@ Exposes tools for searching notes, indexing, and managing the vector store.
 """
 
 import os
-from pathlib import Path
-from typing import Optional, Dict, Any, List
-from fastmcp import FastMCP
-from config import Config
-from embeddings import EmbeddingService
-from vector_store import VectorStore
-from indexer import VaultIndexer
-from chunker import MarkdownChunker
-from contextlib import asynccontextmanager
-from contextlib import asynccontextmanager
-from logger import setup_logging, get_logger
+import sys
 import re
+from typing import Optional, Dict, Any, List
+from contextlib import asynccontextmanager
+
+from fastmcp import FastMCP
+from logger import setup_logging, get_logger
+
+# Modular imports
+from settings import get_settings
+from dependencies import get_indexer, get_vector_store, get_embedding_service
+# Type hinting imports
+from services.indexer_service import VaultIndexer
+from repositories.snippet_repository import VectorStore
+from services.embedding_service import EmbeddingService
+
 
 logger = get_logger("server")
-
-# Global instances (lazy-initialized)
-_config: Optional[Config] = None
-_embedding_service: Optional[EmbeddingService] = None
-_vector_store: Optional[VectorStore] = None
-_indexer: Optional[VaultIndexer] = None
-
-def get_config() -> Config:
-    """Get or initialize configuration."""
-    global _config
-    if _config is None:
-        _config = Config()
-    return _config
-
-def get_embedding_service() -> EmbeddingService:
-    """Get or initialize embedding service."""
-    global _embedding_service
-    if _embedding_service is None:
-        config = get_config()
-        _embedding_service = EmbeddingService(
-            api_key=config.openai_api_key,
-            model=config.embedding_model,
-            batch_size=config.embedding_batch_size
-        )
-    return _embedding_service
-
-def get_vector_store() -> VectorStore:
-    """Get or initialize vector store."""
-    global _vector_store
-    if _vector_store is None:
-        config = get_config()
-        _vector_store = VectorStore(
-            persist_directory=str(config.chromadb_path)
-        )
-    return _vector_store
-
-def get_indexer() -> VaultIndexer:
-    """Get or initialize vault indexer."""
-    global _indexer
-    if _indexer is None:
-        config = get_config()
-        vector_store = get_vector_store()
-        embedding_service = get_embedding_service()
-        chunker = MarkdownChunker(
-            target_chunk_size=config.target_chunk_size,
-            max_chunk_size=config.max_chunk_size,
-            min_chunk_size=config.min_chunk_size
-        )
-        _indexer = VaultIndexer(
-            vault_path=config.vault_path,
-            vector_store=vector_store,
-            embedding_service=embedding_service,
-            chunker=chunker
-        )
-    return _indexer
 
 @asynccontextmanager
 async def lifespan(server: FastMCP):
     """Manage server lifecycle (startup/shutdown)."""
-    import sys
     watcher = None
     try:
-        # Startup logic (previously _prewarm)
+        # Startup logic
         setup_logging()
         logger.info("Pre-warming services...")
-        get_config()
+        
+        # Access dependencies to trigger lazy initialization
+        get_settings()
         get_embedding_service()
         get_vector_store()
         get_indexer()
+        
         logger.info("Services pre-warmed successfully.")
 
         # Start Watcher if enabled
-        config = get_config()
         if os.environ.get("WATCH_MODE", "false").lower() == "true":
             from watcher import VaultWatcher
             
             logger.info("Auto-indexing enabled (WATCH_MODE=true)")
+            settings = get_settings()
             watcher = VaultWatcher(
-                vault_path=config.vault_path,
+                vault_path=settings.obsidian_vault_path,
                 indexer=get_indexer(),
                 vector_store=get_vector_store()
             )
@@ -141,14 +92,12 @@ def semantic_search(
         # Get services
         embedding_service = get_embedding_service()
         vector_store = get_vector_store()
-        config = get_config()
-
+        
         # Generate query embedding
         logger.debug(f"Generating embedding for query: '{query}'")
         query_embedding = embedding_service.embed_single(query)
 
         # Build metadata filter
-
         where_filter = None
         if folder or tags:
             where_filter = {}
@@ -157,7 +106,6 @@ def semantic_search(
             if tags:
                 # Note: ChromaDB metadata stores tags as comma-separated string
                 # For now, we'll filter by exact tag string match
-                # In production, you might want more flexible tag matching
                 where_filter["tags"] = tags
 
         # Query vector store
@@ -236,7 +184,6 @@ def reindex_vault(force: bool = False) -> Dict[str, Any]:
             'errors': result.errors
         }
 
-
     except Exception as e:
         logger.error(f"Reindex failed: {e}", exc_info=True)
         return {
@@ -264,7 +211,7 @@ def get_index_stats() -> Dict[str, Any]:
         - embedding_model: Embedding model used
     """
     try:
-        config = get_config()
+        settings = get_settings()
         vector_store = get_vector_store()
 
         stats = vector_store.get_stats()
@@ -272,12 +219,11 @@ def get_index_stats() -> Dict[str, Any]:
         return {
             'total_chunks': stats['total_chunks'],
             'total_files': stats['total_files'],
-            'vault_path': str(config.vault_path),
+            'vault_path': str(settings.obsidian_vault_path),
             'chromadb_path': stats['persist_directory'],
-            'embedding_model': config.embedding_model,
+            'embedding_model': settings.embedding.model,
             'collection_name': stats['collection_name']
         }
-
 
     except Exception as e:
         return {
@@ -285,9 +231,6 @@ def get_index_stats() -> Dict[str, Any]:
             'total_chunks': 0,
             'total_files': 0
         }
-
-
-
 
 
 @mcp.tool()
@@ -317,13 +260,13 @@ def suggest_links(
     from utils import compute_content_hash
 
     try:
-        config = get_config()
+        settings = get_settings()
         vector_store = get_vector_store()
         embedding_service = get_embedding_service()
         indexer = get_indexer()
 
         # 1. Read target note
-        abs_path = config.vault_path / note_path
+        abs_path = settings.obsidian_vault_path / note_path
         if not abs_path.exists():
             return [{'error': f"File not found: {note_path}"}]
 
@@ -340,12 +283,11 @@ def suggest_links(
         
         if stored_hash and stored_hash == current_hash:
             # Case A: File unchanged, reuse embeddings!
-            # print(f"DEBUG: Cache hit for {note_path}", file=sys.stderr)
             file_data = vector_store.get_by_file_path(note_path)
             embeddings = file_data.get('embeddings', [])
         else:
             # Case B: File modified or new, must generate
-            # print(f"DEBUG: Cache miss for {note_path} (generating)", file=sys.stderr)
+            # Using indexer.chunker which is initialized via DI
             chunks = indexer.chunker.chunk_markdown(content)
              # Extract text from chunks
             chunk_texts = [c.content for c in chunks]
@@ -360,7 +302,6 @@ def suggest_links(
             return [{'error': "No content to analyze in this note"}]
 
         # 3. Query for similar chunks (using all embeddings)
-        # We query for each chunk and aggregate results
         all_results = []
         
         # Build metadata filter
@@ -473,10 +414,10 @@ def index_note(note_path: str) -> Dict[str, Any]:
     """
     logger.info(f"Tool Call: index_note | Path: {note_path}")
     try:
-        config = get_config()
+        settings = get_settings()
         indexer = get_indexer()
 
-        abs_path = config.vault_path / note_path
+        abs_path = settings.obsidian_vault_path / note_path
         if not abs_path.exists():
             logger.warning(f"Note not found: {note_path}")
             return {'error': f"File not found: {note_path}"}
@@ -499,7 +440,6 @@ def index_note(note_path: str) -> Dict[str, Any]:
         }
 
 
-
 @mcp.tool()
 def search_notes(
     pattern: str,
@@ -516,8 +456,8 @@ def search_notes(
     """
     logger.info(f"Tool Call: search_notes | Pattern: '{pattern}' | Root: {root_path}")
     try:
-        config = get_config()
-        base_path = config.vault_path
+        settings = get_settings()
+        base_path = settings.obsidian_vault_path
         
         if root_path:
             search_dir = base_path / root_path
@@ -569,8 +509,8 @@ def get_vault_structure(
     """
     logger.info(f"Tool Call: get_vault_structure | Root: {root_path} | Depth: {depth}")
     try:
-        config = get_config()
-        base_path = config.vault_path
+        settings = get_settings()
+        base_path = settings.obsidian_vault_path
         
         if root_path:
             target_path = base_path / root_path
@@ -580,7 +520,7 @@ def get_vault_structure(
         if not target_path.exists():
             return {"error": f"Path not found: {root_path}"}
 
-        def build_tree(current_path: Path, current_depth: int) -> Any:
+        def build_tree(current_path: Any, current_depth: int) -> Any:
             if current_depth > depth:
                 return "..." # Truncate
 
@@ -589,7 +529,6 @@ def get_vault_structure(
                 # Iterate and sort: directories first, then files
                 items = sorted(list(current_path.iterdir()), key=lambda x: (not x.is_dir(), x.name.lower()))
                 
-                has_files = False
                 for item in items:
                     if item.name.startswith('.'):
                         continue
@@ -598,10 +537,6 @@ def get_vault_structure(
                         tree[item.name] = build_tree(item, current_depth + 1)
                     elif item.suffix == '.md':
                         tree[item.name] = "file"
-                        has_files = True
-                
-                # Optimization: If folder only implies empty or ignored files, maybe show empty?
-                # But we keep it simple.
                 
             except PermissionError:
                 return "ACCESS_DENIED"
@@ -617,8 +552,7 @@ def get_vault_structure(
 
 if __name__ == "__main__":
     import sys
-    import os # Added import for os
-
+    
     # Check for SSE mode (for persistent service)
     if "--sse" in sys.argv or os.environ.get("MCP_TRANSPORT") == "sse":
         logger.info("Starting SSE server on port 8765...")
