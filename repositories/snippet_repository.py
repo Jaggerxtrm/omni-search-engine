@@ -7,6 +7,7 @@ and managing metadata. Provides methods for incremental updates and orphan clean
 
 from pathlib import Path
 from typing import Any
+from collections import Counter
 
 import chromadb
 from chromadb.config import Settings
@@ -208,6 +209,57 @@ class VectorStore:
             "total_files": total_files,
             "collection_name": self.collection_name,
             "persist_directory": str(self.persist_directory),
+        }
+
+    def get_vault_statistics(self) -> dict[str, Any]:
+        """
+        Get detailed statistics about the vault contents.
+
+        Returns:
+            Dict with detailed stats including counts and top lists.
+        """
+        # Fetch only metadata for efficiency
+        results = self.collection.get(include=["metadatas"])
+        metadatas = results["metadatas"] if results["metadatas"] else []
+
+        files = set()
+        tag_counts = Counter()
+        link_counts = Counter()
+        total_links = 0
+
+        for meta in metadatas:
+            # Count unique files
+            if "file_path" in meta:
+                files.add(meta["file_path"])
+
+            # Count tags (stored as comma-separated strings)
+            tags_val = meta.get("tags", "")
+            if tags_val:
+                tags_list = [t.strip() for t in str(tags_val).split(",") if t.strip()]
+                tag_counts.update(tags_list)
+
+            # Count links (stored as comma-separated strings)
+            links_val = meta.get("outbound_links", "")
+            if links_val:
+                links_list = [l.strip() for l in str(links_val).split(",") if l.strip()]
+                link_counts.update(links_list)
+                total_links += len(links_list)
+
+        return {
+            "total_files": len(files),
+            "total_chunks": len(metadatas),
+            "total_links": total_links,
+            "unique_links": len(link_counts),
+            "total_tags": sum(tag_counts.values()),
+            "unique_tags": len(tag_counts),
+            "most_linked_notes": [
+                {"note": note, "count": count}
+                for note, count in link_counts.most_common(10)
+            ],
+            "most_used_tags": [
+                {"tag": tag, "count": count}
+                for tag, count in tag_counts.most_common(10)
+            ],
         }
 
     def reset(self) -> None:

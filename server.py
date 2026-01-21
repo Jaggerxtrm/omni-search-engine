@@ -25,7 +25,7 @@ from logger import get_logger, setup_logging
 
 # Modular imports
 from settings import get_settings
-from utils import compute_content_hash, extract_wikilinks
+from utils import compute_content_hash, extract_wikilinks, extract_all_tags, extract_frontmatter_tags, extract_inline_tags, get_note_title, get_folder, get_relative_path
 
 logger = get_logger("server")
 
@@ -233,6 +233,44 @@ def get_index_stats() -> dict[str, Any]:
         return {
             "error": f"Failed to get stats: {str(e)}",
             "total_chunks": 0,
+            "total_files": 0,
+        }
+
+
+@mcp.tool()
+def get_vault_statistics() -> dict[str, Any]:
+    """
+    Get detailed statistics about the vault.
+
+    Returns:
+        Dictionary with detailed vault statistics:
+        - total_files: Number of unique notes
+        - total_chunks: Number of chunks indexed
+        - total_links: Total number of wikilinks found
+        - unique_links: Number of unique notes linked to
+        - total_tags: Total number of tag occurrences
+        - unique_tags: Number of unique tags
+        - most_linked_notes: List of top 10 most linked notes
+        - most_used_tags: List of top 10 most used tags
+    """
+    logger.info("Tool Call: get_vault_statistics")
+    try:
+        settings = get_settings()
+        vector_store = get_vector_store()
+
+        # Use new detailed stats method
+        stats = vector_store.get_vault_statistics()
+
+        # Add vault path context
+        stats["vault_path"] = str(settings.obsidian_vault_path)
+        stats["embedding_model"] = settings.embedding.model
+
+        return stats
+
+    except Exception as e:
+        logger.error(f"Failed to get vault stats: {e}", exc_info=True)
+        return {
+            "error": f"Failed to get stats: {str(e)}",
             "total_files": 0,
         }
 
@@ -504,6 +542,244 @@ def search_notes(
     except Exception as e:
         logger.error(f"Search notes failed: {e}", exc_info=True)
         return [f"Error: {str(e)}"]
+
+
+@mcp.tool()
+async def read_note(note_path: str) -> dict[str, Any]:
+    """
+    Read the content of a note from the Obsidian vault.
+
+    Args:
+        note_path: Relative path to note (e.g., "1-projects/my-note.md")
+
+    Returns:
+        Dictionary with note content and metadata or error message
+    """
+    logger.info(f"Tool Call: read_note | Path: {note_path}")
+    try:
+        settings = get_settings()
+        abs_path = settings.obsidian_vault_path / note_path
+
+        if not abs_path.exists():
+            logger.warning(f"Note not found: {note_path}")
+            return {"error": f"File not found: {note_path}"}
+
+        if not abs_path.is_file():
+            return {"error": f"Path is not a file: {note_path}"}
+
+        # Read the file content
+        content = abs_path.read_text(encoding="utf-8")
+
+        # Extract metadata
+        tags = extract_all_tags(content)
+        frontmatter_tags = extract_frontmatter_tags(content)
+        inline_tags = extract_inline_tags(content)
+        wikilinks = extract_wikilinks(content)
+        note_title = get_note_title(abs_path)
+        folder = get_folder(abs_path, settings.obsidian_vault_path)
+
+        logger.info(f"Successfully read note: {note_path}")
+        return {
+            "success": True,
+            "file_path": note_path,
+            "content": content,
+            "metadata": {
+                "note_title": note_title,
+                "folder": folder,
+                "tags": tags,
+                "frontmatter_tags": frontmatter_tags,
+                "inline_tags": inline_tags,
+                "wikilinks": wikilinks,
+                "size_bytes": abs_path.stat().st_size,
+                "last_modified": abs_path.stat().st_mtime,
+            },
+        }
+
+    except Exception as e:
+        logger.error(f"Read note failed for {note_path}: {e}", exc_info=True)
+        return {"success": False, "error": f"Read failed: {str(e)}", "file": note_path}
+
+
+@mcp.tool()
+async def write_note(
+    note_path: str, content: str, create_dirs: bool = True
+) -> dict[str, Any]:
+    """
+    Write content to a note in the Obsidian vault.
+
+    Creates the note if it doesn't exist. Optionally creates parent directories.
+    After writing, automatically indexes the note if it's new or changed.
+
+    Args:
+        note_path: Relative path to note (e.g., "1-projects/my-note.md")
+        content: Full content to write to the note
+        create_dirs: Create parent directories if they don't exist (default: True)
+
+    Returns:
+        Dictionary with success status and metadata or error message
+    """
+    logger.info(f"Tool Call: write_note | Path: {note_path}")
+    try:
+        settings = get_settings()
+        abs_path = settings.obsidian_vault_path / note_path
+
+        # Validate path is within vault
+        try:
+            abs_path.resolve().relative_to(settings.obsidian_vault_path.resolve())
+        except ValueError:
+            return {
+                "success": False,
+                "error": f"Path is outside vault: {note_path}",
+            }
+
+        # Check if file already exists
+        file_existed = abs_path.exists()
+
+        # Create parent directories if needed
+        if create_dirs:
+            abs_path.parent.mkdir(parents=True, exist_ok=True)
+        elif not abs_path.parent.exists():
+            return {
+                "success": False,
+                "error": f"Parent directory does not exist: {abs_path.parent}",
+            }
+
+        # Write content to file
+        abs_path.write_text(content, encoding="utf-8")
+
+        # Auto-index the note after writing
+        indexer = get_indexer()
+        chunks_indexed = await indexer.index_single_file(abs_path)
+
+        logger.info(
+            f"Successfully wrote note: {note_path} | "
+            f"New: {not file_existed} | Chunks: {chunks_indexed}"
+        )
+
+        return {
+            "success": True,
+            "file_path": note_path,
+            "was_created": not file_existed,
+            "size_bytes": abs_path.stat().st_size,
+            "chunks_indexed": chunks_indexed,
+        }
+
+    except Exception as e:
+        logger.error(f"Write note failed for {note_path}: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": f"Write failed: {str(e)}",
+            "file": note_path,
+        }
+
+
+@mcp.tool()
+async def append_to_note(note_path: str, content: str) -> dict[str, Any]:
+    """
+    Append content to an existing note in the Obsidian vault.
+
+    If the note doesn't exist, returns an error (use write_note to create new notes).
+
+    Args:
+        note_path: Relative path to note (e.g., "1-projects/my-note.md")
+        content: Content to append to the note
+
+    Returns:
+        Dictionary with success status and metadata or error message
+    """
+    logger.info(f"Tool Call: append_to_note | Path: {note_path}")
+    try:
+        settings = get_settings()
+        abs_path = settings.obsidian_vault_path / note_path
+
+        if not abs_path.exists():
+            logger.warning(f"Note not found: {note_path}")
+            return {
+                "success": False,
+                "error": f"File not found: {note_path}. Use write_note to create new notes.",
+            }
+
+        # Read existing content
+        existing_content = abs_path.read_text(encoding="utf-8")
+
+        # Append new content
+        updated_content = existing_content + "\n" + content
+
+        # Write updated content
+        abs_path.write_text(updated_content, encoding="utf-8")
+
+        # Re-index the note
+        indexer = get_indexer()
+        chunks_indexed = await indexer.index_single_file(abs_path)
+
+        logger.info(
+            f"Successfully appended to note: {note_path} | Chunks: {chunks_indexed}"
+        )
+
+        return {
+            "success": True,
+            "file_path": note_path,
+            "size_bytes": abs_path.stat().st_size,
+            "chunks_indexed": chunks_indexed,
+        }
+
+    except Exception as e:
+        logger.error(f"Append to note failed for {note_path}: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": f"Append failed: {str(e)}",
+            "file": note_path,
+        }
+
+
+@mcp.tool()
+async def delete_note(note_path: str) -> dict[str, Any]:
+    """
+    Delete a note from the Obsidian vault.
+
+    Also removes the note from the vector index.
+
+    Args:
+        note_path: Relative path to note (e.g., "1-projects/my-note.md")
+
+    Returns:
+        Dictionary with success status or error message
+    """
+    logger.info(f"Tool Call: delete_note | Path: {note_path}")
+    try:
+        settings = get_settings()
+        abs_path = settings.obsidian_vault_path / note_path
+
+        if not abs_path.exists():
+            logger.warning(f"Note not found: {note_path}")
+            return {"success": False, "error": f"File not found: {note_path}"}
+
+        if not abs_path.is_file():
+            return {"success": False, "error": f"Path is not a file: {note_path}"}
+
+        # Delete from vector store first
+        vector_store = get_vector_store()
+        file_path_str = get_relative_path(abs_path, settings.obsidian_vault_path)
+
+        # Delete all chunks for this file from the index
+        try:
+            vector_store.delete_by_file_path(file_path_str)
+        except Exception as e:
+            logger.warning(f"Failed to delete from index: {e}")
+
+        # Delete the file
+        abs_path.unlink()
+
+        logger.info(f"Successfully deleted note: {note_path}")
+        return {"success": True, "file_path": note_path, "deleted": True}
+
+    except Exception as e:
+        logger.error(f"Delete note failed for {note_path}: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": f"Delete failed: {str(e)}",
+            "file": note_path,
+        }
 
 
 @mcp.tool()

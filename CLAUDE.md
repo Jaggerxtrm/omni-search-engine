@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 This is an MCP (Model Context Protocol) server for semantic search in Obsidian vaults. It uses OpenAI embeddings and ChromaDB for vector storage. The system is designed with a service-oriented architecture, dependency injection, and Pydantic-based configuration. It supports both local execution and containerized deployment via Docker/Podman.
 
 ## Architecture
-- **API Layer**: `server.py` (FastMCP entry point) exposes tools like `semantic_search`, `index_note`, `reindex_vault`.
+- **API Layer**: `server.py` (FastMCP entry point) exposes tools like `semantic_search`, `index_note`, `reindex_vault`, `read_note`, `write_note`, `append_to_note`, `delete_note`.
 - **Services Layer**: `services/` contains business logic (`indexer_service`, `embedding_service`).
 - **Repositories Layer**: `repositories/` handles data access (`snippet_repository` for ChromaDB).
 - **Core Models**: `models/` defines data structures.
@@ -78,3 +78,52 @@ This is an MCP (Model Context Protocol) server for semantic search in Obsidian v
 - **Add a new tool**: Define the function in `server.py`, decorate with `@mcp.tool()`, and implement logic using services from `dependencies.py`.
 - **Change embedding model**: Update `settings.py` or set `EMBEDDING_MODEL` env var.
 - **Modify chunking**: Adjust `target_chunk_size` in `settings.py` or env vars.
+
+## File Operations Tools
+
+The server provides direct file manipulation capabilities for the Obsidian vault:
+
+### `read_note(note_path: str)`
+Read the content and metadata of a note from the vault.
+
+**Returns:**
+- `content`: Full text content of the note
+- `metadata`: Extracted tags, wikilinks, folder info, file stats
+
+**Example:**
+```python
+result = await read_note("1-projects/my-note.md")
+print(result["content"])
+print(result["metadata"]["tags"])
+```
+
+### `write_note(note_path: str, content: str, create_dirs: bool = True)`
+Create or overwrite a note in the vault. Automatically indexes the note after writing.
+
+**Parameters:**
+- `note_path`: Relative path (e.g., "folder/note.md")
+- `content`: Full content to write
+- `create_dirs`: Create parent directories if needed (default: True)
+
+**Features:**
+- Path validation (ensures file stays within vault)
+- Auto-indexing after write
+- Returns creation status and chunk count
+
+### `append_to_note(note_path: str, content: str)`
+Append content to an existing note. Fails if note doesn't exist (use `write_note` for new notes).
+
+**Use cases:**
+- Adding daily log entries
+- Appending research findings
+- Building cumulative documents
+
+### `delete_note(note_path: str)`
+Delete a note from both the filesystem and the vector index.
+
+**Safety features:**
+- Validates file exists and is a file (not directory)
+- Removes from ChromaDB index before filesystem deletion
+- Returns error if index deletion fails (with warning)
+
+**Use with caution** - this is a destructive operation.
