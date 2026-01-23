@@ -1,0 +1,14 @@
+{
+  "name": "omni-search-engine-marketplace",
+  "owner": {
+    "name": "Dawid",
+    "email": "dawid@example.com"
+  },
+  "plugins": [
+    {
+      "name": "omni-search-engine",
+      "source": "plugins/omni-search-engine",
+      "description": "Semantic search and note management for Obsidian vaults"
+    }
+  ]
+}
