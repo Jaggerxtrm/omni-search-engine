@@ -121,18 +121,20 @@ class VectorStore:
             "distances": results["distances"][0] if results["distances"] else [],
         }
 
-    def get_by_file_path(self, file_path: str) -> dict[str, Any]:
+    def get_by_file_path(self, file_path: str, source_id: str) -> dict[str, Any]:
         """
-        Retrieve all chunks for a specific file.
+        Retrieve all chunks for a specific file in a specific source.
 
         Args:
-            file_path: Relative file path in vault
+            file_path: Relative file path in source
+            source_id: Source Identifier (e.g. "vault", "current_project")
 
         Returns:
             Dict with keys: 'ids', 'documents', 'metadatas'
         """
         results = self.collection.get(
-            where={"file_path": file_path}, include=["embeddings", "documents", "metadatas"]
+            where={"$and": [{"file_path": file_path}, {"source": source_id}]},
+            include=["embeddings", "documents", "metadatas"]
         )
 
         return {
@@ -142,45 +144,58 @@ class VectorStore:
             "embeddings": results["embeddings"],
         }
 
-    def check_content_hash(self, file_path: str) -> str | None:
+    def check_content_hash(self, file_path: str, source_id: str) -> str | None:
         """
         Check if file exists in index and return its stored content hash.
 
         Args:
-            file_path: Relative file path in vault
+            file_path: Relative file path
+            source_id: Source Identifier
 
         Returns:
             Content hash string if file exists, None otherwise
         """
-        results = self.collection.get(where={"file_path": file_path}, limit=1)
+        results = self.collection.get(
+            where={"$and": [{"file_path": file_path}, {"source": source_id}]},
+            limit=1
+        )
 
         if results["metadatas"]:
             return results["metadatas"][0].get("content_hash")
         return None
 
-    def delete_by_file_path(self, file_path: str) -> None:
+    def delete_by_file_path(self, file_path: str, source_id: str) -> None:
         """
-        Delete all chunks for a specific file.
+        Delete all chunks for a specific file in a specific source.
 
         Args:
-            file_path: Relative file path in vault
+            file_path: Relative file path
+            source_id: Source Identifier
         """
         # Get all chunk IDs for this file
-        results = self.collection.get(where={"file_path": file_path})
+        results = self.collection.get(
+            where={"$and": [{"file_path": file_path}, {"source": source_id}]}
+        )
 
         if results["ids"]:
             self.collection.delete(ids=results["ids"])
 
-    def get_all_file_paths(self) -> set[str]:
+    def get_all_file_paths(self, source_id: str | None = None) -> set[str]:
         """
-        Get set of all file paths currently in the index.
+        Get set of all file paths currently in the index for a given source.
 
+        Args:
+            source_id: Optional source ID to filter by.
+        
         Returns:
             Set of file path strings
         """
         # Get all documents
-        results = self.collection.get()
-
+        if source_id:
+             results = self.collection.get(where={"source": source_id})
+        else:
+             results = self.collection.get()
+        
         # Extract unique file paths from metadata
         file_paths = set()
         for metadata in results["metadatas"]:

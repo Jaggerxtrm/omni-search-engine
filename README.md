@@ -5,12 +5,14 @@ Agent-first semantic search system for Obsidian vaults using OpenAI embeddings, 
 ## Features
 
 - 🔍 **Semantic search** across your entire vault
+- 🌐 **Universal Context** - Index multiple projects and your current workspace simultaneously
 - 🔗 **Smart link suggestions** based on content similarity
 - ⚡ **Async Architecture** - Non-blocking operations for high performance
 - 📊 **Markdown-aware chunking** with header hierarchy preservation
 - 💾 **Incremental indexing** with content-hash caching (saves API costs)
 - 🧹 **Offline Cleanup** - Automatically detects and removes ghost notes on startup
 - 📈 **Analytics Tools** - Find orphans, core concepts, and duplicate content
+- 🚀 **Local Reranking** - FlashRank integration for superior search relevance
 - 🐳 **Containerized** for easy deployment (Podman/Docker)
 - 🔒 **Privacy-focused** - vectors stored locally, queries never leave your machine
 - 🏗️ **Modular Architecture** - scalable design with Pydantic settings and Dependency Injection
@@ -101,6 +103,25 @@ Add to `~/.config/claude/claude_desktop_config.json`:
 ```
 
 **Important:** Replace paths with your actual vault location and API key.
+
+## Universal Context (Multi-Source)
+
+The server now supports indexing multiple sources. By default, it indexes:
+1. **Main Vault**: Defined by `VAULT_PATH` in `.env`.
+2. **Current Project**: The directory where the server is running (auto-detected).
+
+You can explicitly configure sources in `config.yaml`:
+```yaml
+sources:
+  - id: "my-vault"
+    name: "Personal Knowledge Base"
+    path: "/home/user/obsidian"
+    type: "obsidian"
+  - id: "work-repo"
+    name: "Work Docs"
+    path: "/home/user/work/docs"
+    type: "code"
+```
 
 ## Development
 

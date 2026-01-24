@@ -62,7 +62,7 @@ async def lifespan(server: FastMCP):
             
             # Use fresh indexer for watcher thread to avoid sharing async loop resources
             watcher = VaultWatcher(
-                vault_path=settings.obsidian_vault_path,
+                sources=settings.sources, # Updated to use multiple sources
                 indexer=get_fresh_indexer(),
                 vector_store=get_vector_store(),
             )
@@ -84,22 +84,23 @@ mcp = FastMCP("obsidian-semantic-search", lifespan=lifespan)
 
 @mcp.tool()
 async def semantic_search(
-    query: str, n_results: int = 5, folder: str | None = None, tags: str | None = None
+    query: str, n_results: int = 5, folder: str | None = None, tags: str | None = None, source: str | None = None
 ) -> list[dict[str, Any]]:
     """
-    Search vault semantically for notes matching the query.
+    Search semantically across all sources (Vaults, Repos) or a specific one.
 
     Args:
         query: Natural language search query
         n_results: Number of results to return (default: 5)
         folder: Optional folder filter (e.g., "1-projects/trading")
         tags: Optional comma-separated string of tags (e.g., "trading,gold"). NOT a list.
+        source: Optional source ID filter (e.g., "vault", "current_project")
 
     Returns:
         List of search results with content, metadata, and similarity scores
     """
     logger.info(
-        f"Tool Call: semantic_search | Query: '{query}' | Folder: {folder} | Tags: {tags}"
+        f"Tool Call: semantic_search | Query: '{query}' | Folder: {folder} | Tags: {tags} | Source: {source}"
     )
     try:
         # Get services
@@ -112,13 +113,17 @@ async def semantic_search(
         query_embedding = await embedding_service.embed_single(query)
 
         # Build metadata filter
-        where_filter = None
-        if folder or tags:
-            where_filter = {}
-            if folder:
-                where_filter["folder"] = folder
-            if tags:
-                where_filter["tags"] = tags
+        where_filter = {}
+        if folder:
+            where_filter["folder"] = folder
+        if tags:
+            where_filter["tags"] = tags
+        if source:
+             where_filter["source"] = source
+        
+        # If no filters, set to None for cleaner logging/calls
+        if not where_filter:
+             where_filter = None
 
         # Query vector store
         # Strategy: Fetch more candidates if reranking is enabled
@@ -144,6 +149,7 @@ async def semantic_search(
                 "content": results["documents"][i],
                 "similarity": round(similarity, 3), # Vector similarity
                 # "score": ... # Will be added by reranker
+                "source": metadata.get("source", "unknown"), # NEW
                 "file_path": metadata.get("file_path", ""),
                 "note_title": metadata.get("note_title", ""),
                 "header_context": metadata.get("header_context", ""),

@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.2] - 2026-01-24
 
 ### Added
+- **Universal Context**: Support for indexing multiple sources simultaneously (e.g., Main Vault + Current Project).
+    - **Zero-Config Auto-Discovery**: Automatically indexes the Current Working Directory (`current_project`) if it's not the vault.
+    - **Context-Aware Search**: `semantic_search` now supports `source` filtering.
+    - **ID Namespacing**: File IDs are now namespaced (`source::path`) to allow same-named files across different projects.
 - **Reranking**: Added local reranking using `FlashRank` (default model: `ms-marco-TinyBERT-L-2-v2`).
 - **Fix**: Resolved `numpy.float32` JSON serialization error in reranking service.
 - **Analytics Tools**:

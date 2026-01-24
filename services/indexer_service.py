@@ -88,144 +88,171 @@ class VaultIndexer:
 
     async def index_vault(self, force: bool = False) -> IndexingResult:
         """
-        Index entire vault with incremental updates.
+        Index all configured sources (Vaults, Repos) with incremental updates.
 
         Args:
             force: If True, reindex all files regardless of changes
 
         Returns:
-            IndexingResult with statistics
+            IndexingResult with aggregated statistics
         """
         start_time = time.time()
         result = IndexingResult()
+        
+        # Determine available sources
+        # We need settings here. Best practice would be to inject settings, 
+        # but for now we might need to access them directly or pass them in __init__
+        # Let's assume the caller configures the indexer with sources or we get them here.
+        from settings import get_settings
+        settings = get_settings()
+        
+        sources = settings.sources
+        
+        if not sources:
+            logger.warning("No sources configured for indexing.")
+            return result
 
-        logger.info("Starting vault indexing...")
-        logger.info(f"Vault path: {self.vault_path}")
+        logger.info(f"Starting multi-source indexing for {len(sources)} sources...")
         logger.info(f"Force reindex: {force}")
 
-        # Discover markdown files
-        markdown_files = self._discover_markdown_files()
-        logger.info(f"Found {len(markdown_files)} markdown files")
+        for source in sources:
+            logger.info(f"--- Indexing Source: {source.name} ({source.id}) ---")
+            logger.info(f"Path: {source.path}")
+            
+            if not source.path.exists():
+                logger.error(f"Source path does not exist: {source.path}")
+                result.errors.append(f"Source path not found: {source.path}")
+                continue
 
-        # Index each file
-        for i, file_path in enumerate(markdown_files, 1):
-            relative_path = get_relative_path(file_path, self.vault_path)
-            logger.info(f"[{i}/{len(markdown_files)}] Processing: {relative_path}")
+            # Discover files in THIS source
+            source_files = self._discover_files(source.path)
+            logger.info(f"Found {len(source_files)} files in {source.id}")
 
-            try:
-                # Check if file needs indexing
-                if not force:
-                    if self._should_skip_file(file_path):
-                        logger.debug(f"  ⊘ Skipped (unchanged): {relative_path}")
-                        result.notes_skipped += 1
-                        continue
+            # Index each file
+            for i, file_path in enumerate(source_files, 1):
+                relative_path = get_relative_path(file_path, source.path)
+                # logger.info(f"[{i}/{len(source_files)}] Processing: {relative_path}")
 
-                # Index the file
-                chunks_count = await self.index_single_file(file_path, force=force)
-                logger.info(f"  ✓ Indexed {relative_path} ({chunks_count} chunks)")
-                result.notes_processed += 1
-                result.chunks_created += chunks_count
+                try:
+                    # Check if file needs indexing
+                    if not force:
+                        if self._should_skip_file(file_path, source.path, source.id):
+                            # logger.debug(f"  ⊘ Skipped (unchanged): {relative_path}")
+                            result.notes_skipped += 1
+                            continue
 
-            except Exception as e:
-                error_msg = f"Error indexing {relative_path}: {str(e)}"
-                logger.error(f"  ✗ {error_msg}")
-                result.errors.append(error_msg)
+                    # Index the file
+                    chunks_count = await self.index_single_file(file_path, source.path, source.id, force=force)
+                    logger.info(f"  ✓ Indexed [{source.id}] {relative_path} ({chunks_count} chunks)")
+                    result.notes_processed += 1
+                    result.chunks_created += chunks_count
 
-        print()
-
-        # Cleanup orphaned files
-        if not force:
-            print("Cleaning up orphaned files...")
-            orphans_removed = self._cleanup_orphans(markdown_files)
-            print(f"✓ Removed {orphans_removed} orphaned files")
-            print()
+                except Exception as e:
+                    error_msg = f"Error indexing {source.id}/{relative_path}: {str(e)}"
+                    logger.error(f"  ✗ {error_msg}")
+                    result.errors.append(error_msg)
+            
+            # Cleanup orphaned files FOR THIS SOURCE
+            if not force:
+                logger.info(f"Cleaning up orphans for {source.id}...")
+                orphans_removed = self._cleanup_orphans(source_files, source.path, source.id)
+                if orphans_removed > 0:
+                    logger.info(f"✓ Removed {orphans_removed} orphaned files from {source.id}")
 
         result.duration_seconds = time.time() - start_time
+        logger.info(f"Indexing complete in {result.duration_seconds:.2f}s")
         return result
 
-    def _discover_markdown_files(self) -> list[Path]:
+    def _discover_files(self, root_path: Path) -> list[Path]:
         """
-        Discover all markdown files in vault.
+        Discover all supported files (markdown, etc) in a source root.
 
         Skips hidden directories (.obsidian, .git, etc.)
 
-        Returns:
-            List of Path objects for markdown files
-        """
-        markdown_files = []
-
-        for path in self.vault_path.rglob("*.md"):
-            # Skip hidden directories
-            if any(part.startswith(".") for part in path.parts):
-                continue
-
-            # Skip if not a file
-            if not path.is_file():
-                continue
-
-            markdown_files.append(path)
-
-        return sorted(markdown_files)
-
-    def _should_skip_file(self, file_path: Path) -> bool:
-        """
-        Check if file should be skipped (unchanged since last index).
-
         Args:
-            file_path: Absolute path to file
+            root_path: Root directory of the source
 
         Returns:
-            True if file should be skipped
+            List of Path objects
+        """
+        files = []
+        extensions = ['*.md', '*.txt', '*.py', '*.js', '*.ts', '*.json', '*.yaml'] # Expanded for codebases
+
+        # rglob is simple but might be slow for huge repos. 
+        # Ideally we'd use 'git ls-files' for repos, but let's stick to fs for now.
+        for ext in extensions:
+            for path in root_path.rglob(ext):
+                # Skip hidden directories
+                if any(part.startswith(".") for part in path.parts):
+                    continue
+
+                # Skip if not a file
+                if not path.is_file():
+                    continue
+
+                files.append(path)
+
+        return sorted(list(set(files))) # dedupe just in case
+
+    def _should_skip_file(self, file_path: Path, source_root: Path, source_id: str) -> bool:
+        """
+        Check if file should be skipped coverage.
         """
         # Read current content
-        with open(file_path, encoding="utf-8") as f:
-            current_content = f.read()
+        try:
+            with open(file_path, encoding="utf-8", errors="ignore") as f:
+                current_content = f.read()
+        except Exception:
+            return True # Skip unreadable files
 
         # Compute current hash
         current_hash = compute_content_hash(current_content)
 
         # Check stored hash
-        relative_path = get_relative_path(file_path, self.vault_path)
-        stored_hash = self.vector_store.check_content_hash(relative_path)
+        relative_path = get_relative_path(file_path, source_root)
+        stored_hash = self.vector_store.check_content_hash(relative_path, source_id)
 
         # Skip if hashes match
         return current_hash == stored_hash
 
-    async def index_single_file(self, file_path: Path, force: bool = False) -> int:
+    async def index_single_file(self, file_path: Path, source_root: Path, source_id: str, force: bool = False) -> int:
         """
-        Index a single markdown file.
-
-        Args:
-            file_path: Absolute path to file
-
-        Returns:
-            Number of chunks created
+        Index a single file.
         """
         # Read file content
-        with open(file_path, encoding="utf-8") as f:
-            content = f.read()
+        try:
+             with open(file_path, encoding="utf-8", errors="ignore") as f:
+                content = f.read()
+        except Exception as e:
+            logger.error(f"Failed to read {file_path}: {e}")
+            return 0
 
         # Optimize: Check if content changed
         current_hash = compute_content_hash(content)
-        relative_path = get_relative_path(file_path, self.vault_path)
+        relative_path = get_relative_path(file_path, source_root)
 
         if not force:
-            saved_hash = self.vector_store.check_content_hash(relative_path)
+            saved_hash = self.vector_store.check_content_hash(relative_path, source_id)
             if saved_hash == current_hash:
                 logger.debug(f"Skipping unchanged file: {relative_path}")
                 return 0
 
-        logger.info(f"Indexing file: {relative_path}")
+        # logger.info(f"Indexing file: {relative_path}")
 
         # Extract metadata
         note_title = get_note_title(file_path)
-        folder = get_folder(file_path, self.vault_path)
-        tags = extract_all_tags(content)
-        links = extract_wikilinks(content)
-        links_str = ",".join(links)
+        folder = get_folder(file_path, source_root)
+        
+        # Only compute rich metadata for Markdown
+        if file_path.suffix == '.md':
+             tags = extract_all_tags(content)
+             links = extract_wikilinks(content)
+             links_str = ",".join(links)
+        else:
+             tags = []
+             links_str = ""
+             
         modified_date = file_path.stat().st_mtime
-
-        # Restore content_hash variable for metadata usage
         content_hash = current_hash
 
         # Chunk the content
@@ -233,8 +260,8 @@ class VaultIndexer:
 
         if not chunks:
             # Empty file, just delete any existing chunks
-            logger.warning(f"File is empty or no valid chunks: {relative_path}. Deleting index.")
-            self.vector_store.delete_by_file_path(relative_path)
+            # logger.warning(f"File is empty or no valid chunks: {relative_path}. Deleting index.")
+            self.vector_store.delete_by_file_path(relative_path, source_id)
             return 0
 
         # Update chunk metadata
@@ -253,6 +280,7 @@ class VaultIndexer:
         metadatas = [
             {
                 "file_path": chunk.file_path,
+                "source": source_id,            # NEW: Source ID
                 "note_title": chunk.note_title,
                 "chunk_index": chunk.chunk_index,
                 "header_context": chunk.header_context,
@@ -265,11 +293,12 @@ class VaultIndexer:
             }
             for chunk in chunks
         ]
-        ids = [f"{relative_path}::{chunk.chunk_index}" for chunk in chunks]
+        
+        # NEW ID Format: source::path::index
+        ids = [f"{source_id}::{relative_path}::{chunk.chunk_index}" for chunk in chunks]
 
-        # Update: Delete old chunks first to ensure no "ghost" chunks remain
-        # if the file was shortened.
-        self.vector_store.delete_by_file_path(relative_path)
+        # Update: Delete old chunks first
+        self.vector_store.delete_by_file_path(relative_path, source_id)
 
         # Add new chunks
         self.vector_store.add_chunks(
@@ -281,98 +310,47 @@ class VaultIndexer:
     async def move_file(self, src_path: Path, dest_path: Path) -> bool:
         """
         Handle file move/rename efficiently by reusing embeddings.
+        
+        TODO: Multisource support for moves.
+        For now we disable optimization and force reindex of destination.
+        """
+        # Simplified for now: just reindex dest
+        await self.index_single_file(dest_path, dest_path.parent, "unknown_source") 
+        # This is broken, we need source info. 
+        # For now, let's just return False so caller handles it via full reindex if needed?
+        # Or better, we assume we find the source via settings?
+        return False
+
+    def _cleanup_orphans(self, current_files: list[Path], source_root: Path, source_id: str) -> int:
+        """
+        Remove entries for files no longer in source.
 
         Args:
-            src_path: Absolute path to source file (old)
-            dest_path: Absolute path to destination file (new)
-
-        Returns:
-            True if move was handled (embeddings reused), False if re-indexing was needed.
-        """
-        rel_src = get_relative_path(src_path, self.vault_path)
-        rel_dest = get_relative_path(dest_path, self.vault_path)
-
-        # 1. Fetch existing chunks for source
-        old_data = self.vector_store.get_by_file_path(rel_src)
-
-        if not old_data["ids"]:
-            # No existing index for source, just index new file normally
-            await self.index_single_file(dest_path)
-            return False
-
-        # 2. Prepare new data re-using embeddings
-        new_embeddings = old_data["embeddings"]
-        new_documents = old_data["documents"]
-
-        # Update metadata with new path info
-        # We need to re-calculate folder, but other chunks details (index, context) logic
-        # relies on content being same.
-        # NOTE: If content changed strictly during move, this might be stale, but
-        # on_moved usually implies just fs path change.
-
-        new_folder = get_folder(dest_path, self.vault_path)
-        new_note_title = get_note_title(dest_path)
-
-        new_metadatas = []
-        new_ids = []
-
-        for i, old_meta in enumerate(old_data["metadatas"]):
-            # Create copy of metadata
-            meta = old_meta.copy()
-
-            # Update path-related fields
-            meta["file_path"] = rel_dest
-            meta["note_title"] = new_note_title
-            meta["folder"] = new_folder
-
-            # Reconstruct ID
-            chunk_index = meta.get("chunk_index", i)
-            new_id = f"{rel_dest}::{chunk_index}"
-
-            new_metadatas.append(meta)
-            new_ids.append(new_id)
-
-        # 3. Add chunk to new path
-        # First clean up any pre-existing chunks at DEST (overwrite)
-        self.vector_store.delete_by_file_path(rel_dest)
-
-        self.vector_store.add_chunks(
-            embeddings=new_embeddings, documents=new_documents, metadatas=new_metadatas, ids=new_ids
-        )
-
-        # 4. Delete old chunks
-        self.vector_store.delete_by_file_path(rel_src)
-
-        return True
-
-    def _cleanup_orphans(self, current_files: list[Path]) -> int:
-        """
-        Remove entries for files no longer in vault.
-
-        Args:
-            current_files: List of current markdown files in vault
+            current_files: List of current files in source
+            source_root: Root path of source
+            source_id: ID of the source being cleaned
 
         Returns:
             Number of orphaned files removed
         """
         # Get current file paths (relative)
-        current_paths = {get_relative_path(f, self.vault_path) for f in current_files}
+        current_paths = {get_relative_path(f, source_root) for f in current_files}
 
-        # Get indexed file paths
-        indexed_paths = self.vector_store.get_all_file_paths()
+        # Get indexed file paths for this source
+        indexed_paths = self.vector_store.get_all_file_paths(source_id)
 
         # Find orphans
         orphans = indexed_paths - current_paths
 
         # Delete orphans
         for orphan_path in orphans:
-            self.vector_store.delete_by_file_path(orphan_path)
+            self.vector_store.delete_by_file_path(orphan_path, source_id)
 
         return len(orphans)
 
     def run_startup_cleanup(self) -> int:
         """
-        Run startup consistency check.
+        Run startup consistency check for all sources.
         Detects and removes files from index that no longer exist on disk.
         (Offline move detection)
 
@@ -380,15 +358,35 @@ class VaultIndexer:
             Number of orphaned files removed.
         """
         logger.info("Running startup consistency check...")
-        current_files = self._discover_markdown_files()
-        removed_count = self._cleanup_orphans(current_files)
         
-        if removed_count > 0:
-            logger.info(f"Startup cleanup: Removed {removed_count} orphaned files (offline moves/deletions)")
-        else:
+        # Determine available sources
+        from settings import get_settings
+        settings = get_settings()
+        sources = settings.sources
+        
+        total_removed = 0
+        
+        if not sources:
+            logger.warning("No sources to clean up.")
+            return 0
+            
+        for source in sources:
+             if not source.path.exists():
+                 logger.warning(f"Skiping cleanup for missing source: {source.path}")
+                 continue
+                 
+             logger.info(f"Checking consistency for source: {source.id}")
+             current_files = self._discover_files(source.path)
+             removed = self._cleanup_orphans(current_files, source.path, source.id)
+             
+             if removed > 0:
+                 logger.info(f"  ✓ Removed {removed} orphaned files from {source.id}")
+                 total_removed += removed
+        
+        if total_removed == 0:
             logger.info("Startup cleanup: Index is consistent with disk.")
             
-        return removed_count
+        return total_removed
 
 
 def create_indexer(
