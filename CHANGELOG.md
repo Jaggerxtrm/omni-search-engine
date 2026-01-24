@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `get_duplicate_content`: Detects semantic duplicates using embedding similarity.
 - **Watcher Logic Improvements**:
     - `on_moved` events now explicitly remove the old file path from the index before indexing the new one, preventing "ghost notes".
+- **Startup Cleanup**:
+    - Implemented Offline Move Detection: Automatically scans for and removes index entries for files that were deleted or renamed while the server was offline.
 
 ## [0.0.1] - 2026-01-16
 
