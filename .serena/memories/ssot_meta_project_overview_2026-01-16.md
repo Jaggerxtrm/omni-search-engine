@@ -1,12 +1,13 @@
 ---
 title: SSOT Project Overview
-version: 0.2.0
-updated: 2026-01-16T10:15:00+01:00
+version: 0.4.0
+updated: 2026-01-24T14:30:00+01:00
 scope: meta
 category: meta
 subcategory: overview
 domain: [meta, documentation]
 changelog:
+  - 0.4.0 (2026-01-24): Added Analytics Tools and fixed watcher move/delete consistency.
   - 0.3.0 (2026-01-16): Added Enhanced Chunking capability
   - 0.2.0 (2026-01-16): Updated with Async architecture and CI/CD details
   - 0.1.0 (2026-01-16): Initial overview based on README and codebase analysis
@@ -23,6 +24,7 @@ To provide an "agent-first" semantic search system for Obsidian vaults, enabling
 5. **Deployment**: Containerized, modular architecture for ease of use.
 6. **Code Quality**: Enforced by strict CI pipeline (MyPy, Ruff).
 7. **Enhanced Chunking**: Context-aware splitting preserves code blocks and tables.
+8. **Analytics**: Tools for identifying orphans, core concepts, and duplicate content.
 
 ## Technical Stack
 - **Language**: Python 3.13+ (AsyncIO)
