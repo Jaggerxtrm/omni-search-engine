@@ -11,6 +11,7 @@ import statistics
 import sys
 from collections import defaultdict
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastmcp import FastMCP
@@ -804,6 +805,200 @@ def get_vault_structure(
         root_path: Relative path to start from (default: vault root).
         depth: Recursion depth (default: 2).
     """
+    logger.info(f"Tool Call: get_vault_structure | Root: {root_path}")
+    try:
+        settings = get_settings()
+        base = settings.obsidian_vault_path
+        start_path = base / root_path if root_path else base
+
+        if not start_path.exists():
+            return {"error": f"Path not found: {start_path}"}
+
+        def build_tree(path: Path, current_depth: int) -> dict[str, Any] | list[str] | str:
+            if current_depth > depth:
+                return "..."
+            
+            if path.is_file():
+                return "file"
+            
+            # Directory
+            tree = {}
+            try:
+                # Sort items for stable output
+                for item in sorted(path.iterdir()):
+                    # Skip hidden
+                    if item.name.startswith("."):
+                        continue
+                    
+                    if item.is_dir():
+                        tree[item.name] = build_tree(item, current_depth + 1)
+                    elif item.suffix == ".md":
+                        tree[item.name] = "file"
+            except PermissionError:
+                return "permission_denied"
+                
+            return tree
+
+        return {"structure": build_tree(start_path, 0)}
+
+    except Exception as e:
+        logger.error(f"Get vault structure failed: {e}", exc_info=True)
+        return {"error": str(e)}
+
+
+
+# --- Logic Implementations (Separated for Testing) ---
+
+def _get_orphaned_notes(vector_store, settings) -> list[dict[str, Any]]:
+    # 1. Get all file paths in vault (from index)
+    all_files = vector_store.get_all_file_paths()
+    
+    # 2. Get all outbound links from all files
+    results = vector_store.collection.get(include=["metadatas"])
+    metadatas = results["metadatas"] if results["metadatas"] else []
+    
+    linked_files = set()
+    
+    # Build map: Title -> {set of possible file paths}
+    title_to_paths = defaultdict(set)
+    for f in all_files:
+        p = Path(f)
+        title = p.stem
+        title_to_paths[title].add(f)
+        
+    # Collect all linking targets
+    for meta in metadatas:
+        outbound = meta.get("outbound_links", "")
+        if outbound:
+            links = [l.strip() for l in str(outbound).split(",") if l.strip()]
+            for l in links:
+                # Clean link: [[Link#Header|Alias]] -> Link
+                clean_link = l.split("|")[0].split("#")[0]
+                if clean_link in title_to_paths:
+                    linked_files.update(title_to_paths[clean_link])
+                    
+    # 3. Find orphans
+    orphans = []
+    for f in all_files:
+        if f not in linked_files:
+            orphans.append({
+                "file_path": f,
+                "note_title": Path(f).stem
+            })
+            
+    return sorted(orphans, key=lambda x: x["file_path"])
+
+def _get_most_linked_notes(vector_store, n_results: int) -> list[dict[str, Any]]:
+    stats = vector_store.get_vault_statistics()
+    top_linked = stats.get("most_linked_notes", [])
+    return top_linked[:n_results]
+
+def _get_duplicate_content(vector_store, similarity_threshold: float) -> list[dict[str, Any]]:
+    import numpy as np
+    
+    # 1. Get all embeddings grouped by file
+    file_embeddings = vector_store.get_all_embeddings()
+    
+    if len(file_embeddings) < 2:
+        return []
+        
+    # 2. Compute average embedding per file (centroid)
+    centroids = {}
+    for fpath, embeds in file_embeddings.items():
+        if not embeds:
+            continue
+        arr = np.array(embeds)
+        centroid = np.mean(arr, axis=0)
+        norm = np.linalg.norm(centroid)
+        if norm > 0:
+            coords = centroid / norm
+            centroids[fpath] = coords
+            
+    # 3. Pairwise comparison
+    duplicates = []
+    keys = list(centroids.keys())
+    
+    for i in range(len(keys)):
+        for j in range(i + 1, len(keys)):
+            file_a = keys[i]
+            file_b = keys[j]
+            
+            vec_a = centroids[file_a]
+            vec_b = centroids[file_b]
+            
+            sim = np.dot(vec_a, vec_b)
+            
+            if sim >= similarity_threshold:
+                duplicates.append({
+                    "file_a": file_a,
+                    "file_b": file_b,
+                    "similarity": round(float(sim), 4)
+                })
+                
+    return sorted(duplicates, key=lambda x: x["similarity"], reverse=True)
+
+
+# --- MCP Tools ---
+
+@mcp.tool()
+def get_orphaned_notes() -> list[dict[str, Any]]:
+    """
+    Find notes that are not linked to by any other note.
+
+    Returns:
+        List of orphaned notes with path and title.
+    """
+    logger.info("Tool Call: get_orphaned_notes")
+    try:
+        settings = get_settings()
+        vector_store = get_vector_store()
+        return _get_orphaned_notes(vector_store, settings)
+    except Exception as e:
+        logger.error(f"Get orphaned notes failed: {e}", exc_info=True)
+        return [{"error": str(e)}]
+
+
+@mcp.tool()
+def get_most_linked_notes(n_results: int = 10) -> list[dict[str, Any]]:
+    """
+    Find notes that are most frequently linked to.
+
+    Args:
+        n_results: Number of results to return.
+
+    Returns:
+        List of notes sorted by incoming link count.
+    """
+    logger.info(f"Tool Call: get_most_linked_notes | N: {n_results}")
+    try:
+        vector_store = get_vector_store()
+        return _get_most_linked_notes(vector_store, n_results)
+    except Exception as e:
+        logger.error(f"Get most linked notes failed: {e}", exc_info=True)
+        return [{"error": str(e)}]
+
+
+@mcp.tool()
+def get_duplicate_content(similarity_threshold: float = 0.95) -> list[dict[str, Any]]:
+    """
+    Find potentially duplicate notes based on high semantic similarity.
+
+    Args:
+        similarity_threshold: Threshold for duplicate detection (0.0 to 1.0).
+                              Default 0.95 (very similar).
+
+    Returns:
+        List of duplicate pairs with similarity scores.
+    """
+    logger.info(f"Tool Call: get_duplicate_content | Threshold: {similarity_threshold}")
+    try:
+        vector_store = get_vector_store()
+        return _get_duplicate_content(vector_store, similarity_threshold)
+    except ImportError:
+        return [{"error": "numpy is required for duplicate detection"}]
+    except Exception as e:
+        logger.error(f"Get duplicate content failed: {e}", exc_info=True)
+        return [{"error": str(e)}]
     logger.info(f"Tool Call: get_vault_structure | Root: {root_path} | Depth: {depth}")
     try:
         settings = get_settings()

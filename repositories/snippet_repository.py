@@ -260,7 +260,33 @@ class VectorStore:
                 {"tag": tag, "count": count}
                 for tag, count in tag_counts.most_common(10)
             ],
+            "most_used_tags": [
+                {"tag": tag, "count": count}
+                for tag, count in tag_counts.most_common(10)
+            ],
         }
+
+    def get_all_embeddings(self) -> dict[str, list[list[float]]]:
+        """
+        Retrieve all embeddings grouped by file path.
+        Used for duplicate content detection.
+
+        Returns:
+            Dict mapping file_path -> list of embedding vectors
+        """
+        # Fetch all data including embeddings
+        results = self.collection.get(include=["embeddings", "metadatas"])
+        
+        if not results["embeddings"] or not results["metadatas"]:
+            return {}
+
+        file_embeddings = defaultdict(list)
+        
+        for embedding, meta in zip(results["embeddings"], results["metadatas"]):
+            if "file_path" in meta:
+                file_embeddings[meta["file_path"]].append(embedding)
+                
+        return file_embeddings
 
     def reset(self) -> None:
         """

@@ -94,7 +94,8 @@ class VaultWatcher(FileSystemEventHandler):
 
                 logger.info(f"Debounce expired, processing: {path.name}")
                 try:
-                    asyncio.run(self.indexer.index_single_file(path))
+                    chunks = asyncio.run(self.indexer.index_single_file(path))
+                    logger.info(f"Successfully processed {path.name} ({chunks} chunks)")
                 except Exception as e:
                     logger.error(f"Failed to index {path.name}: {e}")
 
@@ -155,7 +156,22 @@ class VaultWatcher(FileSystemEventHandler):
         if event.is_directory:
             return
 
-        # We only care about destination for re-indexing
+        # 1. Handle deletion of source file (source path)
+        src_path = self._get_path(event) # Note: _get_path uses event.src_path
+        if src_path.suffix == ".md":
+             # We treat move as delete + create for robustness
+            with self._lock:
+                if str(src_path) in self._pending_files:
+                    del self._pending_files[str(src_path)]
+            
+            logger.info(f"File moved (source): {src_path.name}")
+            try:
+                rel_path = get_relative_path(src_path, self.vault_path)
+                self.vector_store.delete_by_file_path(rel_path)
+            except Exception as e:
+                logger.error(f"Failed to delete embeddings for moved source {src_path}: {e}")
+
+        # 2. Handle creation of destination file
         dest_path = event.dest_path
         if isinstance(dest_path, bytes):
             dest_path = dest_path.decode("utf-8")
