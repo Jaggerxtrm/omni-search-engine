@@ -3,8 +3,19 @@ from functools import lru_cache
 from crawlers.markdown_crawler import MarkdownChunker
 from repositories.snippet_repository import VectorStore
 from services.embedding_service import EmbeddingService
+from services.embedding_service import EmbeddingService
 from services.indexer_service import VaultIndexer
+from services.rerank_service import RerankService
 from settings import get_settings
+
+
+@lru_cache
+def get_rerank_service() -> RerankService:
+    settings = get_settings()
+    return RerankService(
+        model_name=settings.rerank.model,
+        enabled=settings.rerank.enabled
+    )
 
 
 @lru_cache

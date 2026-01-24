@@ -20,6 +20,7 @@ from dependencies import (
     get_embedding_service,
     get_fresh_indexer,
     get_indexer,
+    get_rerank_service,
     get_vector_store,
 )
 from logger import get_logger, setup_logging
@@ -104,6 +105,7 @@ async def semantic_search(
         # Get services
         embedding_service = get_embedding_service()
         vector_store = get_vector_store()
+        rerank_service = get_rerank_service()  # New dependency
 
         # Generate query embedding
         logger.debug(f"Generating embedding for query: '{query}'")
@@ -116,31 +118,32 @@ async def semantic_search(
             if folder:
                 where_filter["folder"] = folder
             if tags:
-                # Note: ChromaDB metadata stores tags as comma-separated string
-                # For now, we'll filter by exact tag string match
                 where_filter["tags"] = tags
 
         # Query vector store
+        # Strategy: Fetch more candidates if reranking is enabled
+        fetch_k = n_results * 5 if rerank_service.enabled else n_results
+        
         results = vector_store.query(
-            query_embedding=query_embedding, n_results=n_results, where=where_filter
+            query_embedding=query_embedding, n_results=fetch_k, where=where_filter
         )
 
-        # Format results with similarity scores
-        formatted_results = []
+        # Format initial results
+        candidates = []
         for i in range(len(results["ids"])):
             distance = results["distances"][i]
-            similarity = 1 - distance  # Convert distance to similarity
-
+            similarity = 1 - distance
             metadata = results["metadatas"][i]
-
+            
             # Convert comma-separated tags back to list
             tags_str = metadata.get("tags", "")
             tags_list = [t.strip() for t in tags_str.split(",") if t.strip()]
 
-            result = {
+            candidate = {
                 "id": results["ids"][i],
                 "content": results["documents"][i],
-                "similarity": round(similarity, 3),
+                "similarity": round(similarity, 3), # Vector similarity
+                # "score": ... # Will be added by reranker
                 "file_path": metadata.get("file_path", ""),
                 "note_title": metadata.get("note_title", ""),
                 "header_context": metadata.get("header_context", ""),
@@ -149,10 +152,13 @@ async def semantic_search(
                 "chunk_index": metadata.get("chunk_index", 0),
                 "token_count": metadata.get("token_count", 0),
             }
-            formatted_results.append(result)
+            candidates.append(candidate)
+            
+        # Rerank candidates
+        final_results = rerank_service.rerank(query, candidates, top_n=n_results)
 
-        logger.info(f"Search successful. Found {len(formatted_results)} results.")
-        return formatted_results
+        logger.info(f"Search successful. Found {len(final_results)} results (from {len(candidates)} candidates).")
+        return final_results
 
     except Exception as e:
         logger.error(f"Search failed: {e}", exc_info=True)

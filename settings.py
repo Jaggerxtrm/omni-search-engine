@@ -16,12 +16,18 @@ class ChunkingSettings(BaseSettings):
     min_chunk_size: int = Field(100, alias="MIN_CHUNK_SIZE")
 
 
+class RerankSettings(BaseSettings):
+    model: str = Field("ms-marco-TinyBERT-L-2-v2", alias="RERANK_MODEL")
+    enabled: bool = Field(True, alias="RERANK_ENABLED")
+
+
 class Settings(BaseSettings):
     obsidian_vault_path: Path = Field(..., alias="OBSIDIAN_VAULT_PATH")
     chromadb_path: Path = Field(Path("chroma_db"), alias="CHROMADB_PATH")
 
     embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
     chunking: ChunkingSettings = Field(default_factory=ChunkingSettings)
+    rerank: RerankSettings = Field(default_factory=RerankSettings)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

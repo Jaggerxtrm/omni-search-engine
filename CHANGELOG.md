@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.0.2] - 2026-01-24
 
 ### Added
+- **Reranking**: Added local reranking using `FlashRank` (default model: `ms-marco-TinyBERT-L-2-v2`).
+- **Fix**: Resolved `numpy.float32` JSON serialization error in reranking service.
 - **Analytics Tools**:
     - `get_orphaned_notes`: Identifies notes with zero incoming links.
     - `get_most_linked_notes`: Lists top referenced notes (core concepts).
