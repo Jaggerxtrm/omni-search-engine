@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.0.2] - 2026-01-24
+
+### Added
+- **Analytics Tools**:
+    - `get_orphaned_notes`: Identifies notes with zero incoming links.
+    - `get_most_linked_notes`: Lists top referenced notes (core concepts).
+    - `get_duplicate_content`: Detects semantic duplicates using embedding similarity.
+- **Watcher Logic Improvements**:
+    - `on_moved` events now explicitly remove the old file path from the index before indexing the new one, preventing "ghost notes".
+
 ## [0.0.1] - 2026-01-16
 
 ### Added
