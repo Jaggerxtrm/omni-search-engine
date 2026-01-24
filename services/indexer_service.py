@@ -370,6 +370,26 @@ class VaultIndexer:
 
         return len(orphans)
 
+    def run_startup_cleanup(self) -> int:
+        """
+        Run startup consistency check.
+        Detects and removes files from index that no longer exist on disk.
+        (Offline move detection)
+
+        Returns:
+            Number of orphaned files removed.
+        """
+        logger.info("Running startup consistency check...")
+        current_files = self._discover_markdown_files()
+        removed_count = self._cleanup_orphans(current_files)
+        
+        if removed_count > 0:
+            logger.info(f"Startup cleanup: Removed {removed_count} orphaned files (offline moves/deletions)")
+        else:
+            logger.info("Startup cleanup: Index is consistent with disk.")
+            
+        return removed_count
+
 
 def create_indexer(
     vault_path: Path,

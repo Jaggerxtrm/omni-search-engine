@@ -48,12 +48,17 @@ async def lifespan(server: FastMCP):
 
         logger.info("Services pre-warmed successfully.")
 
-        # Start Watcher if enabled
         if os.environ.get("WATCH_MODE", "false").lower() == "true":
             from watcher import VaultWatcher
 
             logger.info("Auto-indexing enabled (WATCH_MODE=true)")
             settings = get_settings()
+            
+            # Run startup consistency check (Offline Move Detection)
+            # This cleans up any files deleted/renamed while server was off
+            indexer = get_indexer()
+            indexer.run_startup_cleanup()
+            
             # Use fresh indexer for watcher thread to avoid sharing async loop resources
             watcher = VaultWatcher(
                 vault_path=settings.obsidian_vault_path,
