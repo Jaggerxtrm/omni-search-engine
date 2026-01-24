@@ -9,6 +9,8 @@ Agent-first semantic search system for Obsidian vaults using OpenAI embeddings, 
 - ⚡ **Async Architecture** - Non-blocking operations for high performance
 - 📊 **Markdown-aware chunking** with header hierarchy preservation
 - 💾 **Incremental indexing** with content-hash caching (saves API costs)
+- 🧹 **Offline Cleanup** - Automatically detects and removes ghost notes on startup
+- 📈 **Analytics Tools** - Find orphans, core concepts, and duplicate content
 - 🐳 **Containerized** for easy deployment (Podman/Docker)
 - 🔒 **Privacy-focused** - vectors stored locally, queries never leave your machine
 - 🏗️ **Modular Architecture** - scalable design with Pydantic settings and Dependency Injection
@@ -16,7 +18,7 @@ Agent-first semantic search system for Obsidian vaults using OpenAI embeddings, 
 
 ## Status
 
-**Current Progress:** Refactoring Complete & Containerized ✅
+**Current Progress:** Feature Complete & Containerized ✅
 
 ✅ **Completed:**
 - **Async Refactor**: Fully asynchronous server and tool execution
@@ -26,6 +28,8 @@ Agent-first semantic search system for Obsidian vaults using OpenAI embeddings, 
 - **Containerization**: Optimized image `omni-search-engine`
 - **Core Features**: All MVP tools (Search, Indexing, Stats, Link Suggestions)
 - **Auto-Indexing**: Efficient file watcher with coalescing debounce
+- **Analytics Suite**: Tools for vault health (Orphans, Duplicates, Ranking)
+- **Startup Cleanup**: Self-healing index logic
 
 ## Architecture
 
