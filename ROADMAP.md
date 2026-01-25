@@ -393,7 +393,7 @@ def get_duplicate_content(similarity_threshold: float = 0.9) -> List[Dict[str, A
 
 ## Phase 3: Advanced Features
 
-### Feature 1: Reranking for Better Search
+### Feature 1: Reranking for Better Search ✅ COMPLETE
 
 **Goal:** Improve search result quality with reranking model.
 
@@ -427,7 +427,7 @@ def semantic_search_with_rerank(query: str, n_results: int = 5):
 
 ---
 
-### Feature 2: Multiple Vault Support
+### Feature 2: Multiple Vault Support ✅ COMPLETE
 
 **Goal:** Index and search across multiple Obsidian vaults.
 
@@ -535,7 +535,7 @@ where_filter = {
 
 ---
 
-### Feature 5: Universal Context (Codebase & Git)
+### Feature 5: Universal Context (Codebase & Git) ✅ COMPLETE (Phase 1)
 
 **Goal:** Transform into a "Developer Context Engine" by indexing code and history alongside notes.
 
@@ -642,13 +642,13 @@ For each new feature:
 
 **Phase 2 features impact:**
 
-| Feature | Index Time | Search Time | Storage | API Cost |
-|---------|------------|-------------|---------|----------|
-| suggest_links | No impact | +200ms | No impact | +1 embedding |
-| index_note | -99% | No impact | No impact | Per-file cost |
-| Enhanced chunking | +10% | No impact | No impact | No impact |
-| File watcher | Continuous | No impact | No impact | Per-change cost |
-| Analytics | +5% | +50ms | +10% | No impact |
+| Feature           | Index Time | Search Time | Storage   | API Cost        |
+| ----------------- | ---------- | ----------- | --------- | --------------- |
+| suggest_links     | No impact  | +200ms      | No impact | +1 embedding    |
+| index_note        | -99%       | No impact   | No impact | Per-file cost   |
+| Enhanced chunking | +10%       | No impact   | No impact | No impact       |
+| File watcher      | Continuous | No impact   | No impact | Per-change cost |
+| Analytics         | +5%        | +50ms       | +10%      | No impact       |
 
 **Optimization strategies:**
 - Cache frequently used data
