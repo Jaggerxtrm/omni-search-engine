@@ -1,43 +1,5 @@
-# Obsidian Semantic Search - Configuration File
-
-# Path to your Obsidian vault (absolute path or ~ for home directory)
-# In container: mounted at /vault
-obsidian_vault_path: "/vault"
-
-# OpenAI API key for embeddings
-# Use ${OPENAI_API_KEY} to read from environment variable (recommended)
-# Or paste your key directly: "sk-..."
-openai_api_key: "${OPENAI_API_KEY}"
-
-# ChromaDB storage location (for persistent vector database)
-# In container: stored at /data/chromadb
-chromadb_path: "/data/chromadb"
-
-# Chunking strategy configuration
-chunking:
-  # Target chunk size in tokens (aim for this size)
-  target_chunk_size: 800
-
-  # Maximum chunk size in tokens (never exceed this)
-  max_chunk_size: 1500
-
-  # Minimum chunk size in tokens (merge smaller chunks)
-  min_chunk_size: 100
-
-# Embedding configuration
-embedding:
-  # OpenAI embedding model
-  # Options: "text-embedding-3-small" (cheaper) or "text-embedding-3-large" (better quality)
-  model: "text-embedding-3-small"
-
-  # Number of texts to embed per API call (batch size)
-  batch_size: 100
-
-# Search configuration
-search:
-  # Default number of results to return from semantic search
-  default_n_results: 5
-
-  # Similarity threshold for link suggestions (0.0 to 1.0)
-  # Higher = more similar required
-  similarity_threshold: 0.7
+sources:
+  - id: "vault"
+    name: "Obsidian Vault"
+    path: "/home/dawid/second-mind/vault" # Example path, will be overridden by env var if not set here
+    type: "obsidian"

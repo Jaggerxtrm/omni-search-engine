@@ -120,6 +120,7 @@ Search your vault semantically for relevant content.
 - `n_results` (int, optional): Number of results to return (default: 5)
 - `folder` (string, optional): Filter by folder (e.g., "1-projects/trading")
 - `tags` (string, optional): Filter by comma-separated tags
+- `source` (string, optional): Filter by source ID (e.g., "vault", "current_project")
 
 **Example prompts:**
 ```
@@ -136,6 +137,7 @@ Search your vault semantically for relevant content.
     "id": "gold-markets.md::0",
     "content": "Gold is a precious metal...",
     "similarity": 0.637,
+    "source": "vault",
     "file_path": "gold-markets.md",
     "note_title": "gold-markets",
     "header_context": "# Gold Market Analysis",
