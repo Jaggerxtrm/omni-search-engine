@@ -12,6 +12,8 @@ services:
       - ${VAULT_PATH:-/home/user/vault}:/vault:rw,Z
       # Persist ChromaDB data (Named volume)
       - chroma_data:/data/chromadb
+      # Mount Qwen configuration for authentication
+      - ~/.qwen:/root/.qwen:rw
     # Keep stdin open for MCP communication if needed
     stdin_open: true
     tty: false
