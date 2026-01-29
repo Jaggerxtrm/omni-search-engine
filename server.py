@@ -50,7 +50,7 @@ async def lifespan(server: FastMCP):
         logger.info("Services pre-warmed successfully.")
 
         if os.environ.get("WATCH_MODE", "false").lower() == "true":
-            from watcher import VaultWatcher
+            from watcher import VaultWatcher, ShadowObserver
 
             logger.info("Auto-indexing enabled (WATCH_MODE=true)")
             settings = get_settings()
@@ -60,11 +60,15 @@ async def lifespan(server: FastMCP):
             indexer = get_indexer()
             indexer.run_startup_cleanup()
             
+            # Initialize Shadow Observer
+            shadow_observer = ShadowObserver(settings.obsidian_vault_path)
+            
             # Use fresh indexer for watcher thread to avoid sharing async loop resources
             watcher = VaultWatcher(
                 sources=settings.sources, # Updated to use multiple sources
                 indexer=get_fresh_indexer(),
                 vector_store=get_vector_store(),
+                observers=[shadow_observer],
             )
             watcher.start()
 

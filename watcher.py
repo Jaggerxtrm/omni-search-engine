@@ -8,7 +8,12 @@ Uses the watchdog library for efficient file system monitoring.
 import asyncio
 import threading
 import time
+import datetime
+import uuid
+import subprocess
+import shlex
 from pathlib import Path
+from xml.sax.saxutils import escape
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
@@ -23,6 +28,150 @@ logger = get_logger("watcher")
 
 from settings import SourceConfig
 
+class ShadowObserver:
+    """
+    Background observer that logs file activities to a structured dev-log.md.
+    Uses Qwen AI to summarize changes after a debounce period.
+    """
+    def __init__(self, vault_path: Path, log_file: str = "dev-log.md"):
+        self.vault_path = vault_path
+        self.log_path = vault_path / log_file
+        self.active_sessions = {}  # Map: file_path -> {start_time, last_event, session_id}
+        self.pending_ai_tasks = {} # Map: file_path -> last_event_time
+        self.ai_debounce_seconds = 300.0 # 5 minutes
+        
+        self._ensure_log_header()
+
+    def _ensure_log_header(self):
+        """Ensures the log file exists with a valid header."""
+        if not self.log_path.exists():
+            try:
+                with open(self.log_path, "w", encoding="utf-8") as f:
+                    f.write("# Developer Log\n\n<log>\n")
+            except Exception as e:
+                logger.error(f"ShadowObserver: Failed to create log file: {e}")
+
+    def on_file_processed(self, file_path: Path, chunks_count: int, source_id: str):
+        """Called by VaultWatcher when a file is successfully indexed."""
+        now = time.time()
+        key = str(file_path)
+        
+        # 1. Update Session State
+        session = self.active_sessions.get(key)
+        
+        # Session Logic: 5-minute timeout for "new session"
+        if not session or (now - session['last_event'] > 300):
+            session_id = f"sess_{uuid.uuid4().hex[:8]}"
+            self.active_sessions[key] = {
+                'start_time': now,
+                'last_event': now,
+                'session_id': session_id
+            }
+            event_type = "session_start"
+            context_msg = "New session started"
+        else:
+            session['last_event'] = now
+            session_id = session['session_id']
+            event_type = "modification"
+            context_msg = ""
+
+        # 2. Log "Technical" Event (Immediate)
+        iso_time = datetime.datetime.fromtimestamp(now).isoformat()
+        try:
+            rel_path = file_path.relative_to(self.vault_path)
+        except ValueError:
+            rel_path = file_path.name
+
+        # Wikilink format: [[path/to/file.md]]
+        wikilink = f"[[{rel_path}]]"
+        
+        xml_entry = f"""  <entry id="evt_{int(now)}" timestamp="{iso_time}" session_id="{session_id}" type="{event_type}">
+    <file>{wikilink}</file>
+    <source>{source_id}</source>
+    <stats>
+      <chunks_generated>{chunks_count}</chunks_generated>
+    </stats>
+    {f"<context>{context_msg}</context>" if context_msg else ""}
+  </entry>"""
+
+        self._append_log(xml_entry)
+
+        # 3. Schedule AI Analysis (Debounced)
+        self.pending_ai_tasks[key] = now
+
+    def tick(self):
+        """Called periodically to check for pending AI tasks."""
+        now = time.time()
+        to_process = []
+        
+        # Check for expired debounce
+        for key, last_time in list(self.pending_ai_tasks.items()):
+            if now - last_time >= self.ai_debounce_seconds:
+                to_process.append(Path(key))
+                del self.pending_ai_tasks[key]
+        
+        for file_path in to_process:
+            self._run_ai_analysis(file_path)
+
+    def _run_ai_analysis(self, file_path: Path):
+        """Runs Qwen to analyze changes."""
+        try:
+            # Get git diff
+            # Assumes running in repo root or vault is a repo
+            # We use 'git diff HEAD' to see uncommitted changes
+            cmd = ["git", "diff", "HEAD", "--", str(file_path)]
+            result = subprocess.run(cmd, capture_output=True, text=True, cwd=self.vault_path)
+            
+            diff_output = result.stdout.strip()
+            if not diff_output:
+                return # No changes or not tracked
+
+            # Call Qwen
+            prompt = (
+                f"Analyze the following git diff for file '{file_path.name}'. "
+                "Write a very concise (1 sentence) description of what changed from a developer's perspective. "
+                "Focus on the 'what' and 'why'. Do not mention line numbers.\n\n"
+                f"<diff>\n{diff_output}\n</diff>"
+            )
+            
+            # Using qwen cli
+            qwen_cmd = ["qwen", prompt, "--output-format", "text"]
+            qwen_result = subprocess.run(qwen_cmd, capture_output=True, text=True)
+            
+            if qwen_result.returncode != 0:
+                logger.error(f"Qwen failed: {qwen_result.stderr}")
+                return
+                
+            summary = qwen_result.stdout.strip()
+            
+            # Log AI Entry
+            now = time.time()
+            iso_time = datetime.datetime.fromtimestamp(now).isoformat()
+            
+            try:
+                rel_path = file_path.relative_to(self.vault_path)
+            except ValueError:
+                rel_path = file_path.name
+            
+            ai_entry = f"""  <entry id="ai_{int(now)}" timestamp="{iso_time}" type="ai_summary">
+    <file>[[{rel_path}]]</file>
+    <summary>{escape(summary)}</summary>
+  </entry>"""
+            
+            self._append_log(ai_entry)
+            logger.info(f"AI Summary generated for {file_path.name}")
+
+        except Exception as e:
+            logger.error(f"AI Analysis failed for {file_path}: {e}")
+
+    def _append_log(self, entry: str):
+        try:
+            with open(self.log_path, "a", encoding="utf-8") as f:
+                f.write(entry + "\n")
+        except Exception as e:
+            logger.error(f"ShadowObserver: Write failed: {e}")
+
+
 class VaultWatcher(FileSystemEventHandler):
     """
     Handles file system events for all configured sources and triggers indexing updates.
@@ -34,11 +183,13 @@ class VaultWatcher(FileSystemEventHandler):
         indexer: VaultIndexer,
         vector_store: VectorStore,
         debounce_seconds: float = 30.0,
+        observers: list = None, # NEW: Observers
     ):
         self.sources = sources
         self.indexer = indexer
         self.vector_store = vector_store
         self.debounce_seconds = debounce_seconds
+        self.observers = observers or []
 
         # Coalescing state
         self._pending_files: dict[str, float] = {}  # path -> execution_deadline
@@ -135,8 +286,24 @@ class VaultWatcher(FileSystemEventHandler):
                         self.indexer.index_single_file(path, source.path, source.id)
                     )
                     logger.info(f"Successfully processed {path.name} ({chunks} chunks)")
+                    
+                    # Notify observers
+                    for obs in self.observers:
+                        try:
+                            obs.on_file_processed(path, chunks, source.id)
+                        except Exception as e:
+                            logger.error(f"Observer on_file_processed failed: {e}")
+                            
                 except Exception as e:
                     logger.error(f"Failed to index {path.name}: {e}")
+
+            # Tick observers
+            for obs in self.observers:
+                if hasattr(obs, 'tick'):
+                    try:
+                        obs.tick()
+                    except Exception as e:
+                        logger.error(f"Observer tick failed: {e}")
 
             time.sleep(1.0)  # Check every second
 
