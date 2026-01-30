@@ -24,6 +24,11 @@ class RerankSettings(BaseSettings):
     enabled: bool = Field(True, alias="RERANK_ENABLED")
 
 
+class WatcherSettings(BaseSettings):
+    debounce_seconds: float = Field(2.0, alias="WATCHER_DEBOUNCE_SECONDS")
+    ai_debounce_seconds: float = Field(5.0, alias="WATCHER_AI_DEBOUNCE_SECONDS")
+
+
 class SourceConfig(BaseModel):
     id: str
     name: str
@@ -42,6 +47,7 @@ class Settings(BaseSettings):
     embedding: EmbeddingSettings = Field(default_factory=EmbeddingSettings)
     chunking: ChunkingSettings = Field(default_factory=ChunkingSettings)
     rerank: RerankSettings = Field(default_factory=RerankSettings)
+    watcher: WatcherSettings = Field(default_factory=WatcherSettings)
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

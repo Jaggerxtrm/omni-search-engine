@@ -1,331 +1,215 @@
-"""
-ChromaDB Vector Store Manager
-
-Wrapper for ChromaDB operations: storing embeddings, querying for semantic search,
-and managing metadata. Provides methods for incremental updates and orphan cleanup.
-"""
-
-from pathlib import Path
-from typing import Any
-from collections import Counter
+import os
+import shutil
+from typing import Any, Dict, List, Optional
+import threading
+import numpy as np
 
 import chromadb
 from chromadb.config import Settings
-
+from chromadb.utils import embedding_functions
 
 class VectorStore:
-    """
-    Vector store manager using ChromaDB for embedding storage and retrieval.
-
-    Features:
-    - Persistent local storage
-    - Metadata filtering for advanced queries
-    - Content hash tracking for incremental indexing
-    - File path-based operations for updates and cleanup
-    """
-
     def __init__(self, persist_directory: str, collection_name: str = "obsidian_notes"):
-        """
-        Initialize vector store with persistent ChromaDB.
+        self.client = chromadb.PersistentClient(path=persist_directory)
+        self.collection = self.client.get_or_create_collection(name=collection_name)
+        self._lock = threading.Lock()
 
-        Args:
-            persist_directory: Path to ChromaDB storage directory
-            collection_name: Name of the ChromaDB collection
-        """
-        self.persist_directory = Path(persist_directory).expanduser().resolve()
-        self.collection_name = collection_name
+    def add_chunks(self, chunks: List[Any], metadatas: List[Dict], ids: List[str], embeddings: Optional[List[List[float]]] = None):
+        with self._lock:
+            self.collection.add(
+                documents=chunks,
+                metadatas=metadatas,
+                ids=ids,
+                embeddings=embeddings
+            )
 
-        # Create directory if it doesn't exist
-        self.persist_directory.mkdir(parents=True, exist_ok=True)
-
-        # Initialize ChromaDB client
-        self.client = chromadb.PersistentClient(
-            path=str(self.persist_directory),
-            settings=Settings(anonymized_telemetry=False, allow_reset=True),
+    def query(self, query_embedding: List[float], n_results: int = 5, where: Optional[Dict] = None) -> Dict[str, Any]:
+        return self.collection.query(
+            query_embeddings=[query_embedding],
+            n_results=n_results,
+            where=where
         )
 
-        # Get or create collection
-        self.collection = self.client.get_or_create_collection(
-            name=self.collection_name,
-            metadata={"hnsw:space": "cosine"},  # Use cosine similarity
-        )
+    def delete_by_file_path(self, file_path: str, source_id: str = None):
+        with self._lock:
+            if source_id:
+                where_clause = {
+                    "$and": [
+                        {"file_path": file_path},
+                        {"source": source_id}
+                    ]
+                }
+            else:
+                where_clause = {"file_path": file_path}
+            self.collection.delete(where=where_clause)
 
-    def add_chunks(
-        self,
-        embeddings: list[list[float]],
-        documents: list[str],
-        metadatas: list[dict[str, Any]],
-        ids: list[str],
-    ) -> None:
-        """
-        Add chunks with embeddings to the vector store.
+    def get_by_file_path(self, file_path: str) -> Dict[str, Any]:
+        return self.collection.get(where={"file_path": file_path}, include=["embeddings", "metadatas", "documents"])
 
-        Args:
-            embeddings: List of embedding vectors
-            documents: List of chunk content texts
-            metadatas: List of metadata dicts for each chunk
-            ids: List of unique IDs for each chunk
+    def check_content_hash(self, file_path: str, source_id: str = None) -> Optional[str]:
+        if source_id:
+            where_clause = {
+                "$and": [
+                    {"file_path": file_path},
+                    {"source": source_id}
+                ]
+            }
+        else:
+            where_clause = {"file_path": file_path}
 
-        Raises:
-            ValueError: If input lists have mismatched lengths
-        """
-        if not (len(embeddings) == len(documents) == len(metadatas) == len(ids)):
-            raise ValueError("All input lists must have the same length")
-
-        if embeddings is None or len(embeddings) == 0:
-            return  # Nothing to add
-
-        # ChromaDB requires metadata values to be str, int, float, or bool
-        # Convert any list fields to strings
-        processed_metadatas = []
-        for metadata in metadatas:
-            processed = {}
-            for key, value in metadata.items():
-                if isinstance(value, list):
-                    # Convert list to comma-separated string
-                    processed[key] = ",".join(str(v) for v in value)
-                elif value is None:
-                    # ChromaDB doesn't accept None values
-                    processed[key] = ""
-                else:
-                    processed[key] = value
-            processed_metadatas.append(processed)
-
-        self.collection.add(
-            embeddings=embeddings, documents=documents, metadatas=processed_metadatas, ids=ids
-        )
-
-    def query(
-        self, query_embedding: list[float], n_results: int = 5, where: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
-        """
-        Query vector store for similar chunks.
-
-        Args:
-            query_embedding: Query embedding vector
-            n_results: Number of results to return
-            where: Optional metadata filters (e.g., {"folder": "1-projects"})
-
-        Returns:
-            Dict with keys: 'ids', 'documents', 'metadatas', 'distances'
-        """
-        results = self.collection.query(
-            query_embeddings=[query_embedding], n_results=n_results, where=where
-        )
-
-        # Flatten results (query returns list of lists)
-        return {
-            "ids": results["ids"][0] if results["ids"] else [],
-            "documents": results["documents"][0] if results["documents"] else [],
-            "metadatas": results["metadatas"][0] if results["metadatas"] else [],
-            "distances": results["distances"][0] if results["distances"] else [],
-        }
-
-    def get_by_file_path(self, file_path: str, source_id: str) -> dict[str, Any]:
-        """
-        Retrieve all chunks for a specific file in a specific source.
-
-        Args:
-            file_path: Relative file path in source
-            source_id: Source Identifier (e.g. "vault", "current_project")
-
-        Returns:
-            Dict with keys: 'ids', 'documents', 'metadatas'
-        """
         results = self.collection.get(
-            where={"$and": [{"file_path": file_path}, {"source": source_id}]},
-            include=["embeddings", "documents", "metadatas"]
-        )
-
-        return {
-            "ids": results["ids"],
-            "documents": results["documents"],
-            "metadatas": results["metadatas"],
-            "embeddings": results["embeddings"],
-        }
-
-    def check_content_hash(self, file_path: str, source_id: str) -> str | None:
-        """
-        Check if file exists in index and return its stored content hash.
-
-        Args:
-            file_path: Relative file path
-            source_id: Source Identifier
-
-        Returns:
-            Content hash string if file exists, None otherwise
-        """
-        results = self.collection.get(
-            where={"$and": [{"file_path": file_path}, {"source": source_id}]},
+            where=where_clause,
+            include=["metadatas"],
             limit=1
         )
-
-        if results["metadatas"]:
+        if results["metadatas"] and len(results["metadatas"]) > 0:
             return results["metadatas"][0].get("content_hash")
         return None
 
-    def delete_by_file_path(self, file_path: str, source_id: str) -> None:
-        """
-        Delete all chunks for a specific file in a specific source.
-
-        Args:
-            file_path: Relative file path
-            source_id: Source Identifier
-        """
-        # Get all chunk IDs for this file
-        results = self.collection.get(
-            where={"$and": [{"file_path": file_path}, {"source": source_id}]}
-        )
-
-        if results["ids"]:
-            self.collection.delete(ids=results["ids"])
-
-    def get_all_file_paths(self, source_id: str | None = None) -> set[str]:
-        """
-        Get set of all file paths currently in the index for a given source.
-
-        Args:
-            source_id: Optional source ID to filter by.
-        
-        Returns:
-            Set of file path strings
-        """
-        # Get all documents
-        if source_id:
-             results = self.collection.get(where={"source": source_id})
-        else:
-             results = self.collection.get()
-        
-        # Extract unique file paths from metadata
-        file_paths = set()
-        for metadata in results["metadatas"]:
-            if "file_path" in metadata:
-                file_paths.add(metadata["file_path"])
-
-        return file_paths
-
-    def get_stats(self) -> dict[str, Any]:
-        """
-        Get statistics about the vector store.
-
-        Returns:
-            Dict with stats: total_chunks, total_files, collection_name
-        """
-        # Count total chunks
-        all_data = self.collection.get()
-        total_chunks = len(all_data["ids"])
-
-        # Count unique files
-        file_paths = self.get_all_file_paths()
-        total_files = len(file_paths)
-
+    def get_stats(self) -> Dict[str, Any]:
         return {
-            "total_chunks": total_chunks,
-            "total_files": total_files,
-            "collection_name": self.collection_name,
-            "persist_directory": str(self.persist_directory),
+            "total_chunks": self.collection.count(),
+            "total_files": len(self.get_all_file_paths()),
+            "persist_directory": self.client.get_settings().persist_directory, # Access settings correctly
+            "collection_name": self.collection.name
         }
 
-    def get_vault_statistics(self) -> dict[str, Any]:
-        """
-        Get detailed statistics about the vault contents.
-
-        Returns:
-            Dict with detailed stats including counts and top lists.
-        """
-        # Fetch only metadata for efficiency
-        results = self.collection.get(include=["metadatas"])
-        metadatas = results["metadatas"] if results["metadatas"] else []
-
+    def get_all_file_paths(self, source_id: str = None) -> List[str]:
+        # This is expensive, but Chroma doesn't have a distinct query yet
+        # We fetch only metadatas to be lighter
+        where_filter = None
+        if source_id:
+            where_filter = {"source": source_id}
+            
+        results = self.collection.get(include=["metadatas"], where=where_filter)
+        if not results["metadatas"]:
+            return []
+        
         files = set()
-        tag_counts = Counter()
-        link_counts = Counter()
-        total_links = 0
-
-        for meta in metadatas:
-            # Count unique files
+        for meta in results["metadatas"]:
             if "file_path" in meta:
                 files.add(meta["file_path"])
+        return list(files)
 
-            # Count tags (stored as comma-separated strings)
-            tags_val = meta.get("tags", "")
-            if tags_val:
-                tags_list = [t.strip() for t in str(tags_val).split(",") if t.strip()]
-                tag_counts.update(tags_list)
+    def get_vault_statistics(self) -> Dict[str, Any]:
+        """
+        Compute detailed vault statistics.
+        This is an expensive operation as it scans all metadata.
+        """
+        results = self.collection.get(include=["metadatas"])
+        metadatas = results["metadatas"] if results["metadatas"] else []
+        
+        total_chunks = len(metadatas)
+        files = set()
+        all_tags = []
+        all_links = []
+        
+        for meta in metadatas:
+            files.add(meta.get("file_path", "unknown"))
+            
+            # Extract tags (stored as comma-separated string)
+            tags_str = meta.get("tags", "")
+            if tags_str:
+                all_tags.extend([t.strip() for t in tags_str.split(",") if t.strip()])
+                
+            # Extract outbound links (stored as comma-separated string)
+            links_str = meta.get("outbound_links", "")
+            if links_str:
+                # Links format: [[Target]] or [[Target|Alias]]
+                # We just want to count them for now
+                raw_links = [l.strip() for l in links_str.split(",") if l.strip()]
+                all_links.extend(raw_links)
 
-            # Count links (stored as comma-separated strings)
-            links_val = meta.get("outbound_links", "")
-            if links_val:
-                links_list = [l.strip() for l in str(links_val).split(",") if l.strip()]
-                link_counts.update(links_list)
-                total_links += len(links_list)
+        # Compute aggregations
+        from collections import Counter
+        tag_counts = Counter(all_tags)
+        
+        # Parse links to get target notes
+        link_targets = []
+        for l in all_links:
+            # Simple parsing: take content before | or #
+            target = l.split("|")[0].split("#")[0].strip()
+            link_targets.append(target)
+            
+        link_counts = Counter(link_targets)
 
         return {
             "total_files": len(files),
-            "total_chunks": len(metadatas),
-            "total_links": total_links,
-            "unique_links": len(link_counts),
-            "total_tags": sum(tag_counts.values()),
-            "unique_tags": len(tag_counts),
-            "most_linked_notes": [
-                {"note": note, "count": count}
-                for note, count in link_counts.most_common(10)
-            ],
-            "most_used_tags": [
-                {"tag": tag, "count": count}
-                for tag, count in tag_counts.most_common(10)
-            ],
-            "most_used_tags": [
-                {"tag": tag, "count": count}
-                for tag, count in tag_counts.most_common(10)
-            ],
+            "total_chunks": total_chunks,
+            "total_links": len(all_links),
+            "unique_links": len(set(link_targets)),
+            "total_tags": len(all_tags),
+            "unique_tags": len(set(all_tags)),
+            "most_linked_notes": [{"note": k, "count": v} for k, v in link_counts.most_common(10)],
+            "most_used_tags": [{"tag": k, "count": v} for k, v in tag_counts.most_common(10)]
         }
 
-    def get_all_embeddings(self) -> dict[str, list[list[float]]]:
+    def get_all_embeddings(self) -> Dict[str, List[List[float]]]:
         """
-        Retrieve all embeddings grouped by file path.
-        Used for duplicate content detection.
-
-        Returns:
-            Dict mapping file_path -> list of embedding vectors
+        Retrieve all embeddings grouped by file_path.
+        Used for global analysis like duplicate detection.
         """
-        # Fetch all data including embeddings
         results = self.collection.get(include=["embeddings", "metadatas"])
-        
         if not results["embeddings"] or not results["metadatas"]:
             return {}
-
-        file_embeddings = defaultdict(list)
-        
-        for embedding, meta in zip(results["embeddings"], results["metadatas"]):
-            if "file_path" in meta:
-                file_embeddings[meta["file_path"]].append(embedding)
-                
+            
+        file_embeddings = {}
+        for i, meta in enumerate(results["metadatas"]):
+            fpath = meta.get("file_path", "unknown")
+            if fpath not in file_embeddings:
+                file_embeddings[fpath] = []
+            file_embeddings[fpath].append(results["embeddings"][i])
+            
         return file_embeddings
 
-    def reset(self) -> None:
+    def find_duplicates(self, similarity_threshold: float) -> List[Dict[str, Any]]:
         """
-        Delete all data from the collection.
-
-        Warning: This operation cannot be undone!
+        Find potentially duplicate notes based on high semantic similarity.
+        Moved from server.py to centralize vector logic.
         """
-        self.client.delete_collection(name=self.collection_name)
-        self.collection = self.client.get_or_create_collection(
-            name=self.collection_name, metadata={"hnsw:space": "cosine"}
-        )
+        # 1. Get all embeddings grouped by file
+        file_embeddings = self.get_all_embeddings()
+        
+        if len(file_embeddings) < 2:
+            return []
+            
+        # 2. Compute average embedding per file (centroid)
+        centroids = {}
+        for fpath, embeds in file_embeddings.items():
+            if not embeds:
+                continue
+            arr = np.array(embeds)
+            centroid = np.mean(arr, axis=0)
+            norm = np.linalg.norm(centroid)
+            if norm > 0:
+                coords = centroid / norm
+                centroids[fpath] = coords
+                
+        # 3. Pairwise comparison
+        duplicates = []
+        keys = list(centroids.keys())
+        
+        for i in range(len(keys)):
+            for j in range(i + 1, len(keys)):
+                file_a = keys[i]
+                file_b = keys[j]
+                
+                vec_a = centroids[file_a]
+                vec_b = centroids[file_b]
+                
+                sim = np.dot(vec_a, vec_b)
+                
+                if sim >= similarity_threshold:
+                    duplicates.append({
+                        "file_a": file_a,
+                        "file_b": file_b,
+                        "similarity": round(float(sim), 4)
+                    })
+                    
+        return sorted(duplicates, key=lambda x: x["similarity"], reverse=True)
 
-
-def create_vector_store(
-    persist_directory: str, collection_name: str = "obsidian_notes"
-) -> VectorStore:
-    """
-    Convenience function to create a vector store.
-
-    Args:
-        persist_directory: Path to ChromaDB storage directory
-        collection_name: Name of the collection
-
-    Returns:
-        Configured VectorStore instance
-    """
-    return VectorStore(persist_directory=persist_directory, collection_name=collection_name)
+    def reset(self):
+        """Clear all data."""
+        with self._lock:
+            self.client.delete_collection(self.collection.name)
+            self.collection = self.client.create_collection(self.collection.name)

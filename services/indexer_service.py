@@ -167,7 +167,7 @@ class VaultIndexer:
         """
         Discover all supported files (markdown, etc) in a source root.
 
-        Skips hidden directories (.obsidian, .git, etc.)
+        Skips hidden directories (.obsidian, .git, etc.) and common build/dependency directories.
 
         Args:
             root_path: Root directory of the source
@@ -178,12 +178,23 @@ class VaultIndexer:
         files = []
         extensions = ['*.md', '*.txt', '*.py', '*.js', '*.ts', '*.json', '*.yaml'] # Expanded for codebases
 
-        # rglob is simple but might be slow for huge repos. 
+        # Directories to skip
+        skip_dirs = {
+            'venv', 'env', '.venv', '.env',  # Python virtual environments
+            'node_modules', 'bower_components',  # Node.js dependencies
+            '__pycache__', '.pytest_cache', '.mypy_cache',  # Python caches
+            'dist', 'build', 'out', 'target',  # Build outputs
+            '.git', '.svn', '.hg',  # Version control
+            '.obsidian', '.trash',  # Obsidian specific
+            'site-packages', 'lib', 'lib64',  # Python packages
+        }
+
+        # rglob is simple but might be slow for huge repos.
         # Ideally we'd use 'git ls-files' for repos, but let's stick to fs for now.
         for ext in extensions:
             for path in root_path.rglob(ext):
-                # Skip hidden directories
-                if any(part.startswith(".") for part in path.parts):
+                # Skip hidden directories or excluded directories
+                if any(part.startswith(".") or part in skip_dirs for part in path.parts):
                     continue
 
                 # Skip if not a file
@@ -247,9 +258,10 @@ class VaultIndexer:
         if file_path.suffix == '.md':
              tags = extract_all_tags(content)
              links = extract_wikilinks(content)
-             links_str = ",".join(links)
+             tags_str = ",".join(tags) if tags else ""
+             links_str = ",".join(links) if links else ""
         else:
-             tags = []
+             tags_str = ""
              links_str = ""
              
         modified_date = file_path.stat().st_mtime
@@ -269,7 +281,7 @@ class VaultIndexer:
             chunk.file_path = relative_path
             chunk.note_title = note_title
             chunk.folder = folder
-            chunk.tags = tags
+            # Note: chunk.tags remains as list, but we store as string in ChromaDB metadata
 
         # Generate embeddings
         chunk_texts = [chunk.content for chunk in chunks]
@@ -285,7 +297,7 @@ class VaultIndexer:
                 "chunk_index": chunk.chunk_index,
                 "header_context": chunk.header_context,
                 "folder": chunk.folder,
-                "tags": chunk.tags,
+                "tags": tags_str,
                 "outbound_links": links_str,
                 "modified_date": modified_date,
                 "content_hash": content_hash,
@@ -302,7 +314,7 @@ class VaultIndexer:
 
         # Add new chunks
         self.vector_store.add_chunks(
-            embeddings=embeddings, documents=documents, metadatas=metadatas, ids=ids
+            chunks=documents, metadatas=metadatas, ids=ids, embeddings=embeddings
         )
 
         return len(chunks)
@@ -337,7 +349,12 @@ class VaultIndexer:
         current_paths = {get_relative_path(f, source_root) for f in current_files}
 
         # Get indexed file paths for this source
-        indexed_paths = self.vector_store.get_all_file_paths(source_id)
+        try:
+            indexed_paths = set(self.vector_store.get_all_file_paths(source_id))
+        except TypeError:
+            # Fallback for legacy VectorStore signature (no source_id support)
+            logger.warning(f"VectorStore.get_all_file_paths does not support source_id. Fetching all paths (safe fallback for {source_id}).")
+            indexed_paths = set(self.vector_store.get_all_file_paths())
 
         # Find orphans
         orphans = indexed_paths - current_paths

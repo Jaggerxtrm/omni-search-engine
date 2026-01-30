@@ -6,14 +6,15 @@ services:
       - OPENAI_API_KEY
       - OBSIDIAN_VAULT_PATH=/vault
       - CHROMADB_PATH=/data/chromadb
-      - WATCH_MODE
+      - WATCH_MODE=true
+      - SHADOW_AI_DEBOUNCE=30
     volumes:
       # Mount the vault (Read-Write bind mount)
       - ${VAULT_PATH:-/home/user/vault}:/vault:rw,Z
       # Persist ChromaDB data (Named volume)
       - chroma_data:/data/chromadb
       # Mount Qwen configuration for authentication
-      - ~/.qwen:/root/.qwen:rw
+      - ~/.qwen:/root/.qwen:rw,Z
     # Keep stdin open for MCP communication if needed
     stdin_open: true
     tty: false

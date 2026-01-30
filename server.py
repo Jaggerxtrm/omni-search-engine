@@ -13,7 +13,9 @@ from collections import defaultdict
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
+import asyncio # For to_thread
 
+import aiofiles
 from fastmcp import FastMCP
 
 from dependencies import (
@@ -133,8 +135,12 @@ async def semantic_search(
         # Strategy: Fetch more candidates if reranking is enabled
         fetch_k = n_results * 5 if rerank_service.enabled else n_results
         
-        results = vector_store.query(
-            query_embedding=query_embedding, n_results=fetch_k, where=where_filter
+        # Offload heavy vector query to thread to avoid blocking event loop
+        results = await asyncio.to_thread(
+            vector_store.query,
+            query_embedding=query_embedding, 
+            n_results=fetch_k, 
+            where=where_filter
         )
 
         # Format initial results
@@ -260,7 +266,7 @@ def get_index_stats() -> dict[str, Any]:
 
 
 @mcp.tool()
-def get_vault_statistics() -> dict[str, Any]:
+async def get_vault_statistics() -> dict[str, Any]:
     """
     Get detailed statistics about the vault.
 
@@ -281,7 +287,8 @@ def get_vault_statistics() -> dict[str, Any]:
         vector_store = get_vector_store()
 
         # Use new detailed stats method
-        stats = vector_store.get_vault_statistics()
+        # Offload to thread as this is expensive
+        stats = await asyncio.to_thread(vector_store.get_vault_statistics)
 
         # Add vault path context
         stats["vault_path"] = str(settings.obsidian_vault_path)
@@ -330,15 +337,17 @@ async def suggest_links(
         if not abs_path.exists():
             return [{"error": f"File not found: {note_path}"}]
 
-        with open(abs_path, encoding="utf-8") as f:
-            content = f.read()
+        # Async read
+        async with aiofiles.open(abs_path, mode='r', encoding="utf-8") as f:
+            content = await f.read()
 
         # Deduplication: Find existing links to avoid suggesting them again
         existing_links = set(extract_wikilinks(content))
 
         # 2. Check for cached embeddings (Smart Caching)
         current_hash = str(compute_content_hash(content)).strip()
-        stored_hash = vector_store.check_content_hash(note_path)
+        # Offload DB check
+        stored_hash = await asyncio.to_thread(vector_store.check_content_hash, note_path)
         if stored_hash:
             stored_hash = str(stored_hash).strip()
 
@@ -346,7 +355,8 @@ async def suggest_links(
 
         if stored_hash and stored_hash == current_hash:
             # Case A: File unchanged, reuse embeddings!
-            file_data = vector_store.get_by_file_path(note_path)
+            # Offload DB fetch
+            file_data = await asyncio.to_thread(vector_store.get_by_file_path, note_path)
             embeddings = file_data.get("embeddings", [])
         else:
             # Case B: File modified or new, must generate
@@ -380,7 +390,9 @@ async def suggest_links(
             if hasattr(embedding, "tolist"):
                 embedding = embedding.tolist()
 
-            results = vector_store.query(
+            # Offload vector query
+            results = await asyncio.to_thread(
+                vector_store.query,
                 query_embedding=embedding,
                 n_results=n_suggestions * 2,  # Fetch more to filter
                 where=where_filter,
@@ -589,8 +601,9 @@ async def read_note(note_path: str) -> dict[str, Any]:
         if not abs_path.is_file():
             return {"error": f"Path is not a file: {note_path}"}
 
-        # Read the file content
-        content = abs_path.read_text(encoding="utf-8")
+        # Async read
+        async with aiofiles.open(abs_path, mode='r', encoding="utf-8") as f:
+            content = await f.read()
 
         # Extract metadata
         tags = extract_all_tags(content)
@@ -677,8 +690,9 @@ async def write_note(
                 "error": f"Parent directory does not exist: {abs_path.parent}",
             }
 
-        # Write content to file
-        abs_path.write_text(content, encoding="utf-8")
+        # Async Write content to file
+        async with aiofiles.open(abs_path, mode='w', encoding="utf-8") as f:
+            await f.write(content)
 
         # Auto-index the note after writing
         indexer = get_indexer()
@@ -732,14 +746,9 @@ async def append_to_note(note_path: str, content: str) -> dict[str, Any]:
                 "error": f"File not found: {note_path}. Use write_note to create new notes.",
             }
 
-        # Read existing content
-        existing_content = abs_path.read_text(encoding="utf-8")
-
-        # Append new content
-        updated_content = existing_content + "\n" + content
-
-        # Write updated content
-        abs_path.write_text(updated_content, encoding="utf-8")
+        # Async Append
+        async with aiofiles.open(abs_path, mode='a', encoding="utf-8") as f:
+            await f.write("\n" + content)
 
         # Re-index the note
         indexer = get_indexer()
@@ -795,8 +804,9 @@ async def delete_note(note_path: str) -> dict[str, Any]:
         file_path_str = get_relative_path(abs_path, settings.obsidian_vault_path)
 
         # Delete all chunks for this file from the index
+        # Offload DB delete
         try:
-            vector_store.delete_by_file_path(file_path_str)
+            await asyncio.to_thread(vector_store.delete_by_file_path, file_path_str)
         except Exception as e:
             logger.warning(f"Failed to delete from index: {e}")
 
@@ -914,55 +924,11 @@ def _get_most_linked_notes(vector_store, n_results: int) -> list[dict[str, Any]]
     top_linked = stats.get("most_linked_notes", [])
     return top_linked[:n_results]
 
-def _get_duplicate_content(vector_store, similarity_threshold: float) -> list[dict[str, Any]]:
-    import numpy as np
-    
-    # 1. Get all embeddings grouped by file
-    file_embeddings = vector_store.get_all_embeddings()
-    
-    if len(file_embeddings) < 2:
-        return []
-        
-    # 2. Compute average embedding per file (centroid)
-    centroids = {}
-    for fpath, embeds in file_embeddings.items():
-        if not embeds:
-            continue
-        arr = np.array(embeds)
-        centroid = np.mean(arr, axis=0)
-        norm = np.linalg.norm(centroid)
-        if norm > 0:
-            coords = centroid / norm
-            centroids[fpath] = coords
-            
-    # 3. Pairwise comparison
-    duplicates = []
-    keys = list(centroids.keys())
-    
-    for i in range(len(keys)):
-        for j in range(i + 1, len(keys)):
-            file_a = keys[i]
-            file_b = keys[j]
-            
-            vec_a = centroids[file_a]
-            vec_b = centroids[file_b]
-            
-            sim = np.dot(vec_a, vec_b)
-            
-            if sim >= similarity_threshold:
-                duplicates.append({
-                    "file_a": file_a,
-                    "file_b": file_b,
-                    "similarity": round(float(sim), 4)
-                })
-                
-    return sorted(duplicates, key=lambda x: x["similarity"], reverse=True)
-
 
 # --- MCP Tools ---
 
 @mcp.tool()
-def get_orphaned_notes() -> list[dict[str, Any]]:
+async def get_orphaned_notes() -> list[dict[str, Any]]:
     """
     Find notes that are not linked to by any other note.
 
@@ -973,14 +939,15 @@ def get_orphaned_notes() -> list[dict[str, Any]]:
     try:
         settings = get_settings()
         vector_store = get_vector_store()
-        return _get_orphaned_notes(vector_store, settings)
+        # Offload to thread
+        return await asyncio.to_thread(_get_orphaned_notes, vector_store, settings)
     except Exception as e:
         logger.error(f"Get orphaned notes failed: {e}", exc_info=True)
         return [{"error": str(e)}]
 
 
 @mcp.tool()
-def get_most_linked_notes(n_results: int = 10) -> list[dict[str, Any]]:
+async def get_most_linked_notes(n_results: int = 10) -> list[dict[str, Any]]:
     """
     Find notes that are most frequently linked to.
 
@@ -993,14 +960,15 @@ def get_most_linked_notes(n_results: int = 10) -> list[dict[str, Any]]:
     logger.info(f"Tool Call: get_most_linked_notes | N: {n_results}")
     try:
         vector_store = get_vector_store()
-        return _get_most_linked_notes(vector_store, n_results)
+        # Offload to thread
+        return await asyncio.to_thread(_get_most_linked_notes, vector_store, n_results)
     except Exception as e:
         logger.error(f"Get most linked notes failed: {e}", exc_info=True)
         return [{"error": str(e)}]
 
 
 @mcp.tool()
-def get_duplicate_content(similarity_threshold: float = 0.95) -> list[dict[str, Any]]:
+async def get_duplicate_content(similarity_threshold: float = 0.95) -> list[dict[str, Any]]:
     """
     Find potentially duplicate notes based on high semantic similarity.
 
@@ -1014,56 +982,13 @@ def get_duplicate_content(similarity_threshold: float = 0.95) -> list[dict[str, 
     logger.info(f"Tool Call: get_duplicate_content | Threshold: {similarity_threshold}")
     try:
         vector_store = get_vector_store()
-        return _get_duplicate_content(vector_store, similarity_threshold)
+        # Offload heavy calculation to thread to prevent event loop blocking
+        return await asyncio.to_thread(vector_store.find_duplicates, similarity_threshold)
     except ImportError:
         return [{"error": "numpy is required for duplicate detection"}]
     except Exception as e:
         logger.error(f"Get duplicate content failed: {e}", exc_info=True)
         return [{"error": str(e)}]
-    logger.info(f"Tool Call: get_vault_structure | Root: {root_path} | Depth: {depth}")
-    try:
-        settings = get_settings()
-        base_path = settings.obsidian_vault_path
-
-        if root_path:
-            target_path = base_path / root_path
-        else:
-            target_path = base_path
-
-        if not target_path.exists():
-            return {"error": f"Path not found: {root_path}"}
-
-        def build_tree(current_path: Any, current_depth: int) -> Any:
-            if current_depth > depth:
-                return "..."  # Truncate
-
-            tree = {}
-            try:
-                # Iterate and sort: directories first, then files
-                items = sorted(
-                    list(current_path.iterdir()),
-                    key=lambda x: (not x.is_dir(), x.name.lower()),
-                )
-
-                for item in items:
-                    if item.name.startswith("."):
-                        continue
-
-                    if item.is_dir():
-                        tree[item.name] = build_tree(item, current_depth + 1)
-                    elif item.suffix == ".md":
-                        tree[item.name] = "file"
-
-            except PermissionError:
-                return "ACCESS_DENIED"
-
-            return tree
-
-        return build_tree(target_path, 0)
-
-    except Exception as e:
-        logger.error(f"Get vault structure failed: {e}", exc_info=True)
-        return {"error": str(e)}
 
 
 if __name__ == "__main__":

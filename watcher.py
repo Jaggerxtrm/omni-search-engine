@@ -11,9 +11,9 @@ import time
 import datetime
 import uuid
 import subprocess
-import shlex
+import logging
 from pathlib import Path
-from xml.sax.saxutils import escape
+from concurrent.futures import ThreadPoolExecutor
 
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
@@ -25,8 +25,7 @@ from utils import get_relative_path
 
 logger = get_logger("watcher")
 
-
-from settings import SourceConfig
+from settings import SourceConfig, get_settings
 
 class ShadowObserver:
     """
@@ -34,12 +33,25 @@ class ShadowObserver:
     Uses Qwen AI to summarize changes after a debounce period.
     """
     def __init__(self, vault_path: Path, log_file: str = "dev-log.md"):
+        settings = get_settings()
         self.vault_path = vault_path
-        self.log_path = vault_path / log_file
-        self.active_sessions = {}  # Map: file_path -> {start_time, last_event, session_id}
-        self.pending_ai_tasks = {} # Map: file_path -> last_event_time
-        self.ai_debounce_seconds = 300.0 # 5 minutes
+        # Resolve to absolute path for safe comparison
+        self.log_path = (vault_path / log_file).resolve()
+        self.active_sessions = {}
+        self.pending_ai_tasks = {}
         
+        # Externalized config
+        self.ai_debounce_seconds = settings.watcher.ai_debounce_seconds
+        
+        self._lock = threading.Lock()
+        
+        # Async Executor for AI/Git tasks
+        self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ShadowAI")
+
+        # State for log formatting
+        self.last_logged_date = None
+        self.last_logged_session_id = None
+
         self._ensure_log_header()
 
     def _ensure_log_header(self):
@@ -47,125 +59,199 @@ class ShadowObserver:
         if not self.log_path.exists():
             try:
                 with open(self.log_path, "w", encoding="utf-8") as f:
-                    f.write("# Developer Log\n\n<log>\n")
+                    f.write("# Developer Log\n\n")
             except Exception as e:
                 logger.error(f"ShadowObserver: Failed to create log file: {e}")
 
     def on_file_processed(self, file_path: Path, chunks_count: int, source_id: str):
         """Called by VaultWatcher when a file is successfully indexed."""
-        now = time.time()
-        key = str(file_path)
-        
-        # 1. Update Session State
-        session = self.active_sessions.get(key)
-        
-        # Session Logic: 5-minute timeout for "new session"
-        if not session or (now - session['last_event'] > 300):
-            session_id = f"sess_{uuid.uuid4().hex[:8]}"
-            self.active_sessions[key] = {
-                'start_time': now,
-                'last_event': now,
-                'session_id': session_id
-            }
-            event_type = "session_start"
-            context_msg = "New session started"
-        else:
-            session['last_event'] = now
-            session_id = session['session_id']
-            event_type = "modification"
-            context_msg = ""
-
-        # 2. Log "Technical" Event (Immediate)
-        iso_time = datetime.datetime.fromtimestamp(now).isoformat()
+        # Prevent infinite loop: do not process the log file itself
         try:
-            rel_path = file_path.relative_to(self.vault_path)
-        except ValueError:
-            rel_path = file_path.name
+            resolved_file = file_path.resolve()
+            # DEBUG LOGGING (Temporary)
+            # logger.info(f"ShadowObserver Check: {resolved_file} vs {self.log_path}")
+            
+            if resolved_file == self.log_path or file_path.name == self.log_path.name:
+                logger.info(f"ShadowObserver: Skipping log file {file_path.name}")
+                return
+        except OSError:
+            pass # File might be gone
 
-        # Wikilink format: [[path/to/file.md]]
-        wikilink = f"[[{rel_path}]]"
-        
-        xml_entry = f"""  <entry id="evt_{int(now)}" timestamp="{iso_time}" session_id="{session_id}" type="{event_type}">
-    <file>{wikilink}</file>
-    <source>{source_id}</source>
-    <stats>
-      <chunks_generated>{chunks_count}</chunks_generated>
-    </stats>
-    {f"<context>{context_msg}</context>" if context_msg else ""}
-  </entry>"""
+        with self._lock:
+            now = time.time()
+            key = str(file_path)
+            dt_object = datetime.datetime.fromtimestamp(now)
+            date_str = dt_object.strftime("%Y-%m-%d")
+            time_str = dt_object.strftime("%H:%M:%S")
 
-        self._append_log(xml_entry)
+            # 1. Update Session State
+            session = self.active_sessions.get(key)
+            if not session or (now - session['last_event'] > 300):
+                session_id = f"sess_{uuid.uuid4().hex[:8]}"
+                self.active_sessions[key] = {
+                    'start_time': now,
+                    'last_event': now,
+                    'session_id': session_id
+                }
+                context_msg = "New session started"
+            else:
+                session['last_event'] = now
+                session_id = session['session_id']
+                context_msg = ""
 
-        # 3. Schedule AI Analysis (Debounced)
-        self.pending_ai_tasks[key] = now
+            # 2. Build Markdown Entry
+            log_buffer = []
+
+            # Date Header
+            if self.last_logged_date != date_str:
+                log_buffer.append(f"\n## [{date_str}]")
+                self.last_logged_date = date_str
+                self.last_logged_session_id = None
+
+            # Session Header
+            if self.last_logged_session_id != session_id:
+                log_buffer.append(f"\n### Session `{session_id}`")
+                self.last_logged_session_id = session_id
+
+            # File Entry
+            try:
+                rel_path = file_path.relative_to(self.vault_path)
+            except ValueError:
+                rel_path = file_path.name
+            
+            entry_line = f"- **{time_str}**: Modified [[{rel_path}]] ({chunks_count} chunks)"
+            if context_msg:
+                entry_line += f" - *{context_msg}*"
+            
+            log_buffer.append(entry_line)
+
+            self._append_log("\n".join(log_buffer))
+
+            # 3. Schedule AI Analysis
+            self.pending_ai_tasks[key] = now
 
     def tick(self):
         """Called periodically to check for pending AI tasks."""
         now = time.time()
         to_process = []
         
-        # Check for expired debounce
-        for key, last_time in list(self.pending_ai_tasks.items()):
-            if now - last_time >= self.ai_debounce_seconds:
-                to_process.append(Path(key))
-                del self.pending_ai_tasks[key]
+        with self._lock:
+            # Check for expired debounce
+            for key, last_time in list(self.pending_ai_tasks.items()):
+                if now - last_time >= self.ai_debounce_seconds:
+                    to_process.append(Path(key))
+                    del self.pending_ai_tasks[key]
         
+        # Submit to executor instead of running inline (NON-BLOCKING)
         for file_path in to_process:
-            self._run_ai_analysis(file_path)
+            self._executor.submit(self._run_ai_analysis, file_path)
 
     def _run_ai_analysis(self, file_path: Path):
-        """Runs Qwen to analyze changes."""
-        try:
-            # Get git diff
-            # Assumes running in repo root or vault is a repo
-            # We use 'git diff HEAD' to see uncommitted changes
-            cmd = ["git", "diff", "HEAD", "--", str(file_path)]
-            result = subprocess.run(cmd, capture_output=True, text=True, cwd=self.vault_path)
-            
-            diff_output = result.stdout.strip()
-            if not diff_output:
-                return # No changes or not tracked
+        """Runs Qwen to analyze changes (Thread-Safe)."""
+        debug_log = self.vault_path / "shadow-debug.log"
+        
+        def log_debug(msg):
+            try:
+                with open(debug_log, "a", encoding="utf-8") as dbg:
+                    dbg.write(f"[{datetime.datetime.now()}] {msg}\n")
+            except Exception:
+                pass
 
-            # Call Qwen
-            prompt = (
-                f"Analyze the following git diff for file '{file_path.name}'. "
-                "Write a very concise (1 sentence) description of what changed from a developer's perspective. "
-                "Focus on the 'what' and 'why'. Do not mention line numbers.\n\n"
-                f"<diff>\n{diff_output}\n</diff>"
-            )
+        log_debug(f"Analyzing {file_path}")
+
+        try:
+            diff_output = ""
+            is_untracked = False
             
-            # Using qwen cli
-            qwen_cmd = ["qwen", prompt, "--output-format", "text"]
-            qwen_result = subprocess.run(qwen_cmd, capture_output=True, text=True)
-            
-            if qwen_result.returncode != 0:
-                logger.error(f"Qwen failed: {qwen_result.stderr}")
-                return
-                
-            summary = qwen_result.stdout.strip()
-            
-            # Log AI Entry
-            now = time.time()
-            iso_time = datetime.datetime.fromtimestamp(now).isoformat()
-            
+            # Use relative path for git commands to avoid CWD issues
             try:
                 rel_path = file_path.relative_to(self.vault_path)
             except ValueError:
-                rel_path = file_path.name
+                rel_path = file_path.name # Fallback
+
+            # 1. Check if file is tracked
+            try:
+                # git ls-files --error-unmatch <file> returns 0 if tracked, 1 if not
+                subprocess.run(
+                    ["git", "ls-files", "--error-unmatch", str(rel_path)],
+                    cwd=self.vault_path,
+                    check=True,
+                    capture_output=True,
+                    timeout=5
+                )
+            except subprocess.CalledProcessError:
+                is_untracked = True
+            except Exception as e:
+                log_debug(f"Git tracking check failed: {e}")
+                # Assume tracked or broken git, try diff anyway
+
+            # 2. Get Context (Diff or Full Content)
+            if is_untracked:
+                try:
+                    # Treat new files as full content
+                    content = file_path.read_text(encoding='utf-8')
+                    # Limit content size for prompt
+                    diff_output = f"New Untracked File Content:\n{content[:4000]}"
+                except Exception as e:
+                    log_debug(f"Failed to read untracked file: {e}")
+            else:
+                # Standard Git Diff
+                try:
+                    # Check if HEAD exists (repo might be empty)
+                    subprocess.run(
+                        ["git", "rev-parse", "HEAD"], 
+                        cwd=self.vault_path, 
+                        check=True, 
+                        capture_output=True,
+                        timeout=5
+                    )
+                    
+                    cmd = ["git", "diff", "HEAD", "--", str(rel_path)]
+                    result = subprocess.run(
+                        cmd, 
+                        capture_output=True, 
+                        text=True, 
+                        cwd=self.vault_path,
+                        timeout=10 
+                    )
+                    if result.returncode == 0:
+                        diff_output = result.stdout.strip()
+                    else:
+                        log_debug(f"Git diff failed: {result.stderr}")
+                except subprocess.SubprocessError:
+                     # Fallback for empty repo or git error
+                     if file_path.exists():
+                         try:
+                             diff_output = f"File Snapshot (Git failed):\n{file_path.read_text(encoding='utf-8')[:4000]}"
+                         except Exception:
+                             pass
+
+            if not diff_output:
+                return
+
+            # 3. Call Qwen
+            prompt = (
+                f"Analyze the changes in '{file_path.name}' and provide a concise, single-sentence summary "
+                f"suitable for a developer log. Focus on the intent (why) and the key change (what). "
+                f"Do not use markdown headers. Diff:\n{diff_output[:4000]}"
+            )
+            qwen_cmd = ["qwen", prompt, "--output-format", "text"]
             
-            ai_entry = f"""  <entry id="ai_{int(now)}" timestamp="{iso_time}" type="ai_summary">
-    <file>[[{rel_path}]]</file>
-    <summary>{escape(summary)}</summary>
-  </entry>"""
-            
-            self._append_log(ai_entry)
-            logger.info(f"AI Summary generated for {file_path.name}")
+            qwen_result = subprocess.run(qwen_cmd, capture_output=True, text=True, timeout=30)
+            summary = qwen_result.stdout.strip() if qwen_result.returncode == 0 else "Analysis failed"
+
+            # Log AI Entry (Markdown)
+            with self._lock:
+                ai_entry = f"  > **AI Analysis**: {summary}"
+                self._append_log(ai_entry)
 
         except Exception as e:
             logger.error(f"AI Analysis failed for {file_path}: {e}")
+            log_debug(f"EXCEPTION in thread: {e}")
 
     def _append_log(self, entry: str):
         try:
+            # Assumes lock is held by caller if needed, but 'a' is usually safe for appending lines
             with open(self.log_path, "a", encoding="utf-8") as f:
                 f.write(entry + "\n")
         except Exception as e:
@@ -182,13 +268,15 @@ class VaultWatcher(FileSystemEventHandler):
         sources: list[SourceConfig],
         indexer: VaultIndexer,
         vector_store: VectorStore,
-        debounce_seconds: float = 30.0,
-        observers: list = None, # NEW: Observers
+        debounce_seconds: float = None, # Allow override or default
+        observers: list = None,
     ):
+        settings = get_settings()
         self.sources = sources
         self.indexer = indexer
         self.vector_store = vector_store
-        self.debounce_seconds = debounce_seconds
+        # Use settings or override
+        self.debounce_seconds = debounce_seconds if debounce_seconds is not None else settings.watcher.debounce_seconds
         self.observers = observers or []
 
         # Coalescing state
