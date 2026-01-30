@@ -138,37 +138,45 @@ async def semantic_search(
         # Offload heavy vector query to thread to avoid blocking event loop
         results = await asyncio.to_thread(
             vector_store.query,
-            query_embedding=query_embedding, 
-            n_results=fetch_k, 
+            query_embedding=query_embedding,
+            n_results=fetch_k,
             where=where_filter
         )
 
         # Format initial results
         candidates = []
-        for i in range(len(results["ids"])):
-            distance = results["distances"][i]
-            similarity = 1 - distance
-            metadata = results["metadatas"][i]
-            
-            # Convert comma-separated tags back to list
-            tags_str = metadata.get("tags", "")
-            tags_list = [t.strip() for t in tags_str.split(",") if t.strip()]
 
-            candidate = {
-                "id": results["ids"][i],
-                "content": results["documents"][i],
-                "similarity": round(similarity, 3), # Vector similarity
-                # "score": ... # Will be added by reranker
-                "source": metadata.get("source", "unknown"), # NEW
-                "file_path": metadata.get("file_path", ""),
-                "note_title": metadata.get("note_title", ""),
-                "header_context": metadata.get("header_context", ""),
-                "folder": metadata.get("folder", ""),
-                "tags": tags_list,
-                "chunk_index": metadata.get("chunk_index", 0),
-                "token_count": metadata.get("token_count", 0),
-            }
-            candidates.append(candidate)
+        # ChromaDB returns list of lists (one per query). We only have one query.
+        if results["ids"] and len(results["ids"]) > 0:
+            ids = results["ids"][0]
+            distances = results["distances"][0] if results["distances"] else []
+            metadatas = results["metadatas"][0] if results["metadatas"] else []
+            documents = results["documents"][0] if results["documents"] else []
+
+            for i in range(len(ids)):
+                distance = distances[i]
+                similarity = 1 - distance
+                metadata = metadatas[i]
+
+                # Convert comma-separated tags back to list
+                tags_str = metadata.get("tags", "")
+                tags_list = [t.strip() for t in tags_str.split(",") if t.strip()]
+
+                candidate = {
+                    "id": ids[i],
+                    "content": documents[i],
+                    "similarity": round(similarity, 3), # Vector similarity
+                    # "score": ... # Will be added by reranker
+                    "source": metadata.get("source", "unknown"), # NEW
+                    "file_path": metadata.get("file_path", ""),
+                    "note_title": metadata.get("note_title", ""),
+                    "header_context": metadata.get("header_context", ""),
+                    "folder": metadata.get("folder", ""),
+                    "tags": tags_list,
+                    "chunk_index": metadata.get("chunk_index", 0),
+                    "token_count": metadata.get("token_count", 0),
+                }
+                candidates.append(candidate)
             
         # Rerank candidates
         final_results = rerank_service.rerank(query, candidates, top_n=n_results)
@@ -398,10 +406,13 @@ async def suggest_links(
                 where=where_filter,
             )
 
-            # Unpack results
-            ids = results["ids"]
-            distances = results["distances"]
-            metadatas = results["metadatas"]
+            # Unpack results (Chroma returns list of lists)
+            if not results["ids"] or not results["ids"][0]:
+                continue
+
+            ids = results["ids"][0]
+            distances = results["distances"][0] if results["distances"] else []
+            metadatas = results["metadatas"][0] if results["metadatas"] else []
 
             for i in range(len(ids)):
                 match_file = str(metadatas[i].get("file_path", ""))
@@ -512,7 +523,12 @@ async def index_note(note_path: str) -> dict[str, Any]:
             return {"error": f"File not found: {note_path}"}
 
         # Index the file using the exposed method
-        chunks = await indexer.index_single_file(abs_path)
+        # TODO: Dynamically resolve source based on path for multi-source support
+        chunks = await indexer.index_single_file(
+            file_path=abs_path,
+            source_root=settings.obsidian_vault_path,
+            source_id="vault"
+        )
 
         logger.info(f"Indexed note: {note_path} | Chunks: {chunks}")
         return {"success": True, "file": note_path, "chunks_indexed": chunks}
@@ -696,7 +712,11 @@ async def write_note(
 
         # Auto-index the note after writing
         indexer = get_indexer()
-        chunks_indexed = await indexer.index_single_file(abs_path)
+        chunks_indexed = await indexer.index_single_file(
+            file_path=abs_path,
+            source_root=settings.obsidian_vault_path,
+            source_id="vault"
+        )
 
         logger.info(
             f"Successfully wrote note: {note_path} | "
@@ -752,7 +772,11 @@ async def append_to_note(note_path: str, content: str) -> dict[str, Any]:
 
         # Re-index the note
         indexer = get_indexer()
-        chunks_indexed = await indexer.index_single_file(abs_path)
+        chunks_indexed = await indexer.index_single_file(
+            file_path=abs_path,
+            source_root=settings.obsidian_vault_path,
+            source_id="vault"
+        )
 
         logger.info(
             f"Successfully appended to note: {note_path} | Chunks: {chunks_indexed}"
@@ -987,8 +1011,10 @@ async def get_duplicate_content(similarity_threshold: float = 0.95) -> list[dict
     except ImportError:
         return [{"error": "numpy is required for duplicate detection"}]
     except Exception as e:
-        logger.error(f"Get duplicate content failed: {e}", exc_info=True)
-        return [{"error": str(e)}]
+        import traceback
+        error_msg = f"Get duplicate content failed: {e}\n{traceback.format_exc()}"
+        logger.error(error_msg)
+        return [{"error": error_msg}]
 
 
 if __name__ == "__main__":

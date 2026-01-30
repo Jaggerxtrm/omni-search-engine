@@ -62,7 +62,7 @@ class VectorStore:
             include=["metadatas"],
             limit=1
         )
-        if results["metadatas"] and len(results["metadatas"]) > 0:
+        if results["metadatas"] is not None and len(results["metadatas"]) > 0:
             return results["metadatas"][0].get("content_hash")
         return None
 
@@ -82,7 +82,7 @@ class VectorStore:
             where_filter = {"source": source_id}
             
         results = self.collection.get(include=["metadatas"], where=where_filter)
-        if not results["metadatas"]:
+        if results["metadatas"] is None or len(results["metadatas"]) == 0:
             return []
         
         files = set()
@@ -97,7 +97,7 @@ class VectorStore:
         This is an expensive operation as it scans all metadata.
         """
         results = self.collection.get(include=["metadatas"])
-        metadatas = results["metadatas"] if results["metadatas"] else []
+        metadatas = results["metadatas"] if results["metadatas"] is not None else []
         
         total_chunks = len(metadatas)
         files = set()
@@ -150,7 +150,7 @@ class VectorStore:
         Used for global analysis like duplicate detection.
         """
         results = self.collection.get(include=["embeddings", "metadatas"])
-        if not results["embeddings"] or not results["metadatas"]:
+        if results["embeddings"] is None or len(results["embeddings"]) == 0:
             return {}
             
         file_embeddings = {}
@@ -167,8 +167,15 @@ class VectorStore:
         Find potentially duplicate notes based on high semantic similarity.
         Moved from server.py to centralize vector logic.
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         # 1. Get all embeddings grouped by file
-        file_embeddings = self.get_all_embeddings()
+        try:
+            file_embeddings = self.get_all_embeddings()
+        except Exception as e:
+            logger.error(f"Error in get_all_embeddings: {e}")
+            raise
         
         if len(file_embeddings) < 2:
             return []
@@ -176,14 +183,18 @@ class VectorStore:
         # 2. Compute average embedding per file (centroid)
         centroids = {}
         for fpath, embeds in file_embeddings.items():
-            if not embeds:
+            if embeds is None or len(embeds) == 0:
                 continue
-            arr = np.array(embeds)
-            centroid = np.mean(arr, axis=0)
-            norm = np.linalg.norm(centroid)
-            if norm > 0:
-                coords = centroid / norm
-                centroids[fpath] = coords
+            try:
+                arr = np.array(embeds)
+                centroid = np.mean(arr, axis=0)
+                norm = np.linalg.norm(centroid)
+                if float(norm) > 0:
+                    coords = centroid / norm
+                    centroids[fpath] = coords
+            except Exception as e:
+                logger.error(f"Error processing embeddings for {fpath}: {e}")
+                raise
                 
         # 3. Pairwise comparison
         duplicates = []
@@ -191,20 +202,32 @@ class VectorStore:
         
         for i in range(len(keys)):
             for j in range(i + 1, len(keys)):
-                file_a = keys[i]
-                file_b = keys[j]
-                
-                vec_a = centroids[file_a]
-                vec_b = centroids[file_b]
-                
-                sim = np.dot(vec_a, vec_b)
-                
-                if sim >= similarity_threshold:
-                    duplicates.append({
-                        "file_a": file_a,
-                        "file_b": file_b,
-                        "similarity": round(float(sim), 4)
-                    })
+                try:
+                    file_a = keys[i]
+                    file_b = keys[j]
+                    
+                    vec_a = centroids[file_a]
+                    vec_b = centroids[file_b]
+                    
+                    sim = np.dot(vec_a, vec_b)
+
+                    # Handle numpy scalar robustly
+                    if isinstance(sim, np.ndarray):
+                        sim_val = float(sim.item())
+                    else:
+                        sim_val = float(sim)
+
+                    # Ensure threshold is scalar for comparison
+                    threshold_scalar = float(similarity_threshold)
+                    if sim_val >= threshold_scalar:
+                        duplicates.append({
+                            "file_a": file_a,
+                            "file_b": file_b,
+                            "similarity": round(sim_val, 4)
+                        })
+                except Exception as e:
+                    logger.error(f"Error comparing {keys[i]} and {keys[j]}: {e}")
+                    raise
                     
         return sorted(duplicates, key=lambda x: x["similarity"], reverse=True)
 
