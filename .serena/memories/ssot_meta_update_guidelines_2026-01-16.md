@@ -1,13 +1,14 @@
 ---
 title: SSOT Update & Maintenance Guidelines
-version: 0.1.0
-updated: 2026-01-16T03:35:00+01:00
+version: 0.2.0
+updated: 2026-02-01T02:00:00+01:00
 scope: documentation-process, taxonomy, naming-conventions
 category: meta
 subcategory: guidelines
 domain: [meta, documentation, process]
 applicability: all future SSOT/docs/memories for the project
 changelog:
+  - 0.2.0 (2026-02-01): Added Watcher & Observer Patterns section mandating feedback loop prevention.
   - 0.1.0 (2026-01-16): Initial guidelines replicated from yfinance-test (v0.3.3) for omni-search-engine.
 ---
 
@@ -72,3 +73,7 @@ Provide a repeatable process for creating, updating, and versioning Single Sourc
 - Changes summarized; gaps/next steps listed.
 - Related SSOTs cross-referenced (bidirectional where applicable).
 - No secrets/credentials; concise summaries instead of large code dumps.
+
+## Watcher & Observer Patterns
+- **Feedback Loop Prevention**: When implementing file watchers or observers that write to the file system (e.g., logs), **ALWAYS** explicitly ignore the target output files in the watcher's event handler.
+- **Log Noise**: Prefer in-place updates or consolidation for high-frequency events to avoid cluttering human-readable logs.
