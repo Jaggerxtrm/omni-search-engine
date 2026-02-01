@@ -65,23 +65,26 @@ class ShadowObserver:
             except Exception as e:
                 logger.error(f"ShadowObserver: Failed to create log file: {e}")
 
-    def on_commit(self, git_dir: Path):
-        """Called by VaultWatcher when a git commit is detected."""
-        logger.info("ShadowObserver: Detected Git Commit")
-        self._executor.submit(self._process_commit, git_dir)
+    def on_file_processed(self, file_path: Path, chunks_count: int, source_id: str):
+        """
+        Called by VaultWatcher when a file is successfully indexed.
+        
+        NOTE: Logging of individual file events is DISABLED to reduce noise.
+        We only track activity internally if needed, but for now we rely purely on 
+        git commits for the developer log.
+        """
+        pass
 
     def _process_commit(self, git_dir: Path):
-        """Analyze and log the latest commit."""
+        """Analyze and log the latest commit with a personal assistant style summary."""
         try:
-            # Resolve repo root (assuming git_dir is .git/logs/HEAD or similar)
-            # We need the folder containing .git
+            # Resolve repo root
             if ".git" in str(git_dir):
-                repo_root = git_dir.parent.parent.parent # .git/logs/HEAD -> repo
+                repo_root = git_dir.parent.parent.parent
             else:
                 repo_root = self.vault_path
 
             # 1. Get Commit Info
-            # Hash | Subject | Author | Date
             cmd = ["git", "log", "-1", "--pretty=format:%h|%s|%an|%ai"]
             result = subprocess.run(cmd, cwd=repo_root, capture_output=True, text=True, timeout=5)
             
@@ -90,132 +93,53 @@ class ShadowObserver:
                 return
 
             commit_info = result.stdout.strip().split("|")
-            if len(commit_info) < 4:
-                return
+            if len(commit_info) < 4: return
 
             short_hash, subject, author, date_iso = commit_info
             
-            # 2. Get Commit Diff for AI
-            diff_cmd = ["git", "show", short_hash, "--stat"]
+            # 2. Get Commit Diff & Stat
+            # We want the stats to see which files changed, and the diff for context
+            diff_cmd = ["git", "show", short_hash, "--stat", "--patch"]
             diff_result = subprocess.run(diff_cmd, cwd=repo_root, capture_output=True, text=True, timeout=10)
-            diff_text = diff_result.stdout[:4000]
+            diff_text = diff_result.stdout[:6000] # Increased context for better summary
 
-            # 3. AI Analysis
+            # 3. AI Analysis - Personal Assistant Persona
             prompt = (
-                f"Analyze this git commit: '{subject}'. \n"
-                f"Provide a concise, single-sentence insight about its impact or technical significance. \n"
-                f"Diff context:\n{diff_text}"
+                f"You are a helpful personal assistant for a software developer.\n"
+                f"The developer just made a commit with the message: '{subject}'.\n\n"
+                f"Here is the diff of their work:\n{diff_text}\n\n"
+                f"Please write a brief, friendly session summary (2-3 sentences). \n"
+                f"1. Identify the key files they worked on.\n"
+                f"2. Explain *what* they achieved in plain English (narrative style).\n"
+                f"3. Do not be overly technical; focus on the *intent* and *outcome* of the session.\n"
+                f"Example: 'You focused on the authentication module today, specifically updating the login logic in `auth.py`. It looks like you successfully refactored the token generation to be more secure.'"
             )
-            qwen_result = subprocess.run(["qwen", prompt, "--output-format", "text"], capture_output=True, text=True, timeout=30)
-            ai_analysis = qwen_result.stdout.strip() if qwen_result.returncode == 0 else "Analysis failed"
+            
+            qwen_result = subprocess.run(["qwen", prompt, "--output-format", "text"], capture_output=True, text=True, timeout=45)
+            ai_analysis = qwen_result.stdout.strip() if qwen_result.returncode == 0 else "Could not generate summary."
 
             # 4. Log Entry
             now = time.time()
             timestamp = datetime.datetime.fromtimestamp(now).isoformat()
             event_id = f"evt_commit_{short_hash}"
             
-            # Determine relative path of repo for context
-            try:
-                repo_name = repo_root.name
-            except:
-                repo_name = "unknown-repo"
-
             entry_xml = (
-                f'  <entry id="{event_id}" timestamp="{timestamp}" type="commit">\n'
-                f'    <source>git</source>\n'
+                f'  <entry id="{event_id}" timestamp="{timestamp}" type="session_summary">\n'
                 f'    <commit_hash>{short_hash}</commit_hash>\n'
-                f'    <author>{author}</author>\n'
                 f'    <message>{subject}</message>\n'
-                f'    <summary>{ai_analysis}</summary>\n'
+                f'    <assistant_summary>\n'
+                f'      {ai_analysis}\n'
+                f'    </assistant_summary>\n'
                 f'  </entry>'
             )
 
-            # Reset session state since a commit usually marks a boundary
             with self._lock:
-                self.last_logged_session_id = None 
-                self.last_logged_file_path = None
                 self._append_to_log_root(entry_xml)
 
-            logger.info(f"Logged commit {short_hash}")
+            logger.info(f"Logged session summary for commit {short_hash}")
 
         except Exception as e:
             logger.error(f"ShadowObserver: Commit processing failed: {e}")
-
-    def on_file_processed(self, file_path: Path, chunks_count: int, source_id: str):
-        """Called by VaultWatcher when a file is successfully indexed."""
-        # Prevent infinite loop: do not process the log file itself
-        try:
-            resolved_file = file_path.resolve()
-            if resolved_file == self.log_path or file_path.name == self.log_path.name:
-                return
-        except OSError:
-            pass
-
-        with self._lock:
-            now = time.time()
-            key = str(file_path)
-            timestamp = datetime.datetime.fromtimestamp(now).isoformat()
-            event_id = f"evt_{int(now)}"
-
-            # 1. Update Session State
-            session = self.active_sessions.get(key)
-            is_new_session = False
-            if not session or (now - session['last_event'] > self.session_timeout_seconds):
-                session_id = f"sess_{uuid.uuid4().hex[:8]}"
-                session = {
-                    'start_time': now,
-                    'last_event': now,
-                    'session_id': session_id,
-                    'edit_count': 1,
-                    'last_ai_time': 0
-                }
-                self.active_sessions[key] = session
-                is_new_session = True
-                event_type = "session_start"
-            else:
-                session['last_event'] = now
-                session['edit_count'] += 1
-                session_id = session['session_id']
-                event_type = "modification"
-
-            try:
-                rel_path = file_path.relative_to(self.vault_path)
-            except ValueError:
-                rel_path = file_path.name
-
-            # 2. Build XML Entry
-            duration = int(now - session['start_time'])
-            
-            # If same session/file, we update the existing entry if it's the last one
-            if not is_new_session and self.last_logged_file_path == key and self.last_logged_session_id == session_id:
-                entry_xml = (
-                    f'  <entry id="{event_id}" timestamp="{timestamp}" session_id="{session_id}" type="modification">\n'
-                    f'    <file>{rel_path}</file>\n'
-                    f'    <stats>\n'
-                    f'      <chunks>{chunks_count}</chunks>\n'
-                    f'      <edits>{session["edit_count"]}</edits>\n'
-                    f'      <duration_sec>{duration}</duration_sec>\n'
-                    f'    </stats>\n'
-                    f'  </entry>'
-                )
-                self._update_last_entry(entry_xml)
-            else:
-                entry_xml = (
-                    f'  <entry id="{event_id}" timestamp="{timestamp}" session_id="{session_id}" type="{event_type}">\n'
-                    f'    <file>{rel_path}</file>\n'
-                    f'    <source>{source_id}</source>\n'
-                    f'    <stats><chunks>{chunks_count}</chunks></stats>\n'
-                    f'  </entry>'
-                )
-                self._append_to_log_root(entry_xml)
-
-            # Track state
-            self.last_logged_file_path = key
-            self.last_logged_session_id = session_id
-
-            # 3. Schedule AI Analysis
-            if now - session['last_ai_time'] > self.ai_debounce_seconds * 2:
-                self.pending_ai_tasks[key] = now
 
     def _append_to_log_root(self, entry_xml: str):
         """Append an entry before the closing </log> tag."""
