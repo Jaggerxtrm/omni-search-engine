@@ -1,33 +1,64 @@
 ---
-title: SSOT Docker Operations
-version: 0.1.0
-updated: 2026-01-16T10:00:00+01:00
-scope: infra
+title: SSOT Infra Docker Ops
+version: 1.1.0
+updated: 2026-02-01T02:45:00+01:00
+scope: docker, compose, operations
 category: infra
 subcategory: docker
-domain: [infra, docker, deployment]
+domain: [infra, docker, devops]
 changelog:
-  - 0.1.0 (2026-01-16): Containerization reference
+  - 1.1.0 (2026-02-01): Added source code bind mount configuration for development mode.
+  - 0.1.0 (2026-01-16): Initial Docker operations documentation.
 ---
 
-## Container Spec (`Dockerfile`)
-- **Base Image**: `python:3.13-slim` (Minimal footprint).
-- **Structure**:
-    *   Dependencies installed first (layer caching).
-    *   Source code copied to `/app`.
-    *   Data directory `/data/chromadb` created.
-- **Entrypoint**: `python server.py`.
+# Docker Operations SSOT
 
-## Orchestration (`docker-compose.yml`)
-- **Service**: `omni-search-engine`.
-- **Volumes**:
-    *   Vault Bind Mount: `${VAULT_PATH}:/vault:ro` (Read-Only safety).
-    *   Data Volume: `chroma_data:/data/chromadb` (Persistence).
-- **Network**: Exposes port `8765` for SSE mode.
-- **Environment**: Passes through API keys and config.
+## Overview
+This document outlines the containerized architecture and operational procedures for the Omni Search Engine.
+
+## Container Architecture
+- **Base Image**: `python:3.13-slim`
+- **Service Name**: `omni-search-engine`
+- **Orchestration**: `docker-compose.yml`
+
+## Volumes & Mounts
+The service uses a combination of bind mounts and named volumes:
+
+1.  **Source Code (Development)**: `.:/app:z`
+    *   **Purpose**: Live code reloading. Changes on the host are immediately reflected in the container.
+2.  **Vault Data**: `${VAULT_PATH}:/vault:rw,Z`
+    *   **Purpose**: Access to the Obsidian vault for indexing and monitoring.
+3.  **ChromaDB Data**: `chroma_data:/data/chromadb`
+    *   **Purpose**: Persistent storage for vector embeddings (named volume).
+4.  **Qwen Config**: `~/.qwen:/root/.qwen:rw,Z`
+    *   **Purpose**: Authentication for the Qwen AI agent.
+
+## Environment Variables
+- `OPENAI_API_KEY`: Required for embeddings.
+- `OBSIDIAN_VAULT_PATH`: Internal path `/vault`.
+- `CHROMADB_PATH`: Internal path `/data/chromadb`.
+- `WATCH_MODE`: `true` to enable the background watcher.
+- `SHADOW_AI_DEBOUNCE`: Debounce time for AI analysis (seconds).
 
 ## Operational Commands
-- **Build**: `docker-compose build`
-- **Run (Detached)**: `docker-compose up -d`
-- **Logs**: `docker-compose logs -f`
-- **Clean**: `docker-compose down -v` (CAUTION: deletes vector index)
+
+### Start Service
+```bash
+docker-compose up -d
+```
+
+### Rebuild Image
+Required when adding new dependencies to `requirements.txt` or `Dockerfile`:
+```bash
+docker-compose up -d --build
+```
+
+### View Logs
+```bash
+docker-compose logs -f
+```
+
+### Stop Service
+```bash
+docker-compose down
+```

@@ -9,6 +9,8 @@ services:
       - WATCH_MODE=true
       - SHADOW_AI_DEBOUNCE=30
     volumes:
+      # Mount source code for development (Read-Write bind mount)
+      - .:/app:z
       # Mount the vault (Read-Write bind mount)
       - ${VAULT_PATH:-/home/user/vault}:/vault:rw,Z
       # Persist ChromaDB data (Named volume)
