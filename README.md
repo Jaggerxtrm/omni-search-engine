@@ -12,6 +12,7 @@ Agent-first semantic search system for Obsidian vaults using OpenAI embeddings, 
 - 💾 **Incremental indexing** with content-hash caching (saves API costs)
 - 🧹 **Offline Cleanup** - Automatically detects and removes ghost notes on startup
 - 📈 **Analytics Tools** - Find orphans, core concepts, and duplicate content
+- 🤖 **Shadow Observer** - Intelligent background agent that logs development sessions and summarizes work upon git commits
 - 🚀 **Local Reranking** - FlashRank integration for superior search relevance
 - 🐳 **Containerized** for easy deployment (Podman/Docker)
 - 🔒 **Privacy-focused** - vectors stored locally, queries never leave your machine

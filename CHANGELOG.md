@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **ShadowObserver**: A background agent that monitors git commits and generates AI-powered session summaries in `dev-log.md`.
+    - **Commit-Only Workflow**: Triggers analysis only on git commits to reduce noise.
+    - **Qwen Integration**: Uses local Qwen model for generating summaries.
+- **Docker Config**: Enabled live code mounting for development.
+
+### Fixed
+- **Indexer**: Resolved type errors and metadata handling.
+- **Watcher**: Fixed issues with file event handling.
+
+### Refactored
+- **ShadowObserver**: Simplified to commit-only workflow from file-event monitoring.
+
 ## [0.0.2] - 2026-01-24
 
 ### Added
