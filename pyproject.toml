@@ -1,3 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "omni-search-engine"
+version = "0.1.0"
+description = "MCP server for semantic search in Obsidian vaults"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastmcp>=0.1.0",
+    "chromadb>=0.4.0",
+    "openai>=1.0.0",
+    "pyyaml>=6.0",
+    "tiktoken>=0.5.0",
+    "markdown>=3.5",
+    "beautifulsoup4>=4.12.0",
+    "watchdog>=3.0.0",
+    "pydantic-settings>=2.0.0",
+    "flashrank>=0.2.0",
+    "aiofiles>=23.2.0",
+    "numpy>=1.24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "mypy>=1.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+account-qwen = "qwen_credential.account_qwen:main"
+
+[tool.setuptools.packages.find]
+include = ["qwen_credential*"]
+
 [tool.ruff]
 target-version = "py313"
 line-length = 100
