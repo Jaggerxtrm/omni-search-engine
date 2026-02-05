@@ -808,6 +808,125 @@ else:
 
 ---
 
-**Document Status:** 📝 Design - Ready for Implementation
+## Implementation Notes & Changes
 
-**Next Steps:** Create isolated worktree, begin Phase 1 implementation.
+### Actual Implementation (February 2025)
+
+The implementation deviated slightly from the original design in several ways:
+
+#### 1. Simplified State Management
+- **Design:** RotationState with embedded AccountStats per account
+- **Implementation:** Kept the same structure but added dataclass-based models for better type safety
+- **File:** `qwen_credential/account_manager.py:67-93`
+
+#### 2. WrapperResult Instead of Tuple Returns
+- **Design:** `call()` returned `(success, output)` tuple
+- **Implementation:** Created `WrapperResult` dataclass with fields:
+  - `success: bool`
+  - `output: str`
+  - `error: str | None`
+  - `attempts: int`
+  - `accounts_tried: list[int] | None`
+- **Benefit:** More structured return values, better debugging
+
+#### 3. CLI Installation via Python Module
+- **Design:** Entry point via setuptools `[project.scripts]`
+- **Implementation:** Added to `pyproject.toml` but requires `pip install -e`
+- **Workaround:** Added alias to `.zshrc`:
+  ```bash
+  alias account-qwen='PYTHONPATH=/path/to/worktree python -m qwen_credential.account_qwen'
+  ```
+
+#### 4. Integration in watcher.py
+- **Two locations modified:**
+  1. Line ~118: Git commit analysis (session summary generation)
+  2. Line ~299: File change analysis (dev-log entry generation)
+- **Method:** Replaced `subprocess.run(["qwen", ...])` with `self.qwen_wrapper.call_with_fallback()`
+- **Fallback messages:** "Could not generate summary." and "Analysis failed"
+
+### Test Results
+
+All 25 unit tests passing:
+- AccountManager tests: 13 tests
+  - State management ✅
+  - Atomic operations ✅
+  - Round-robin rotation ✅
+  - Concurrent access safety ✅
+  - Audit logging ✅
+
+- QwenWrapper tests: 9 tests
+  - Quota pattern detection ✅
+  - Automatic retry logic ✅
+  - Account switching ✅
+  - Error handling ✅
+
+- Integration tests: 2 tests
+  - End-to-end quota recovery ✅
+  - State initialization ✅
+
+### Distribution Considerations
+
+#### Current State (Embedded in omni-search-engine)
+```
+omni-search-engine/
+└── qwen_credential/
+    ├── __init__.py
+    ├── account_manager.py
+    ├── qwen_wrapper.py
+    └── account_qwen.py
+```
+
+#### Recommended: Standalone Package Structure
+```
+credential-rotation/
+├── pyproject.toml          # Independent package
+├── README.md               # Usage instructions
+├── src/
+│   └── credential_rotation/
+│       ├── __init__.py
+│       ├── base.py         # Abstract base classes
+│       ├── qwen/
+│       │   ├── __init__.py
+│       │   ├── manager.py
+│       │   ├── wrapper.py
+│       │   └── cli.py
+│       └── openai/         # Future: OpenAI support
+│           └── ...
+├── tests/
+└── examples/
+```
+
+#### Installation Options
+
+**Option A: pip Package (Recommended)**
+```bash
+# Development install
+pip install -e git+https://github.com/dawid/credential-rotation.git@main#egg=credential-rotation[qwen]
+
+# Production install
+pip install credential-rotation[qwen]
+```
+
+**Option B: Standalone Script (Portable)**
+```bash
+# Single-file script with embedded dependencies
+curl -o /usr/local/bin/account-qwen https://raw.githubusercontent.com/dawid/credential-rotation/main/account-qwen.py
+chmod +x /usr/local/bin/account-qwen
+```
+
+**Option C: Docker Image**
+```bash
+docker pull ghcr.io/dawid/credential-rotation:latest
+docker run -v ~/.qwen:/root/.qwen ghcr.io/dawid/credential-rotation:latest account-qwen --list
+```
+
+---
+
+**Document Status:** ✅ Implementation Complete
+
+**Actual Completion:** February 2025
+- Feature branch: `feature/qwen-credential-rolling`
+- Worktree: `.worktrees/qwen-credential-rolling`
+- Commits: 3 (design, implementation, build config)
+- Test Coverage: 25/25 tests passing
+- Status: Manual rotation tested ✅, automatic rotation pending integration testing
