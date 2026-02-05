@@ -22,6 +22,7 @@ from logger import get_logger
 from repositories.snippet_repository import VectorStore
 from services.indexer_service import VaultIndexer
 from utils import get_relative_path
+from qwen_credential import QwenWrapper
 
 logger = get_logger("watcher")
 
@@ -53,6 +54,9 @@ class ShadowObserver:
         # State for log formatting
         self.last_logged_session_id = None
         self.last_logged_file_path = None
+
+        # Qwen wrapper with credential rotation
+        self.qwen_wrapper = QwenWrapper(max_retries=5)
 
         self._ensure_log_header()
 
@@ -114,9 +118,13 @@ class ShadowObserver:
                 f"3. Do not be overly technical; focus on the *intent* and *outcome* of the session.\n"
                 f"Example: 'You focused on the authentication module today, specifically updating the login logic in `auth.py`. It looks like you successfully refactored the token generation to be more secure.'"
             )
-            
-            qwen_result = subprocess.run(["qwen", prompt, "--output-format", "text"], capture_output=True, text=True, timeout=45)
-            ai_analysis = qwen_result.stdout.strip() if qwen_result.returncode == 0 else "Could not generate summary."
+
+            qwen_result = self.qwen_wrapper.call_with_fallback(
+                prompt,
+                fallback_message="Could not generate summary.",
+                timeout=45
+            )
+            ai_analysis = qwen_result
 
             # 4. Log Entry
             now = time.time()
@@ -296,8 +304,11 @@ class ShadowObserver:
                 f"suitable for a developer log entry. Focus on intent and key change. "
                 f"Diff:\n{diff_output[:4000]}"
             )
-            qwen_result = subprocess.run(["qwen", prompt, "--output-format", "text"], capture_output=True, text=True, timeout=30)
-            summary = qwen_result.stdout.strip() if qwen_result.returncode == 0 else "Analysis failed"
+            summary = self.qwen_wrapper.call_with_fallback(
+                prompt,
+                fallback_message="Analysis failed",
+                timeout=30
+            )
 
             # Upsert Summary
             with self._lock:
