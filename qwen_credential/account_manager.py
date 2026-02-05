@@ -9,17 +9,20 @@ from __future__ import annotations
 
 import fcntl
 import json
-import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Final
+from typing import Any, Final, Callable, TypeVar
 
 import yaml
 
-logger = logging.getLogger(__name__)
+from logger import get_logger
+
+logger = get_logger(__name__)
+
+T = TypeVar('T')
 
 # Constants
 DEFAULT_TOTAL_ACCOUNTS: Final[int] = 5
@@ -282,7 +285,7 @@ class AccountManager:
         except IOError as e:
             logger.error(f"Failed to write to rotation log: {e}")
 
-    def _with_lock(self, func) -> Any:
+    def _with_lock(self, func: Callable[[], T]) -> T:
         """
         Execute function with file lock held.
 

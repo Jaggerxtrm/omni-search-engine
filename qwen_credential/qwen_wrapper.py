@@ -7,19 +7,19 @@ switching when quota exhaustion is detected.
 
 from __future__ import annotations
 
-import logging
 import subprocess
 from dataclasses import dataclass
 from enum import Enum
 from typing import Final
 
+from logger import get_logger
 from qwen_credential.account_manager import (
     AccountManager,
     AccountNotFoundError,
     LockError,
 )
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # Quota/rate limit error patterns
 QUOTA_PATTERNS: Final[tuple[str, ...]] = (

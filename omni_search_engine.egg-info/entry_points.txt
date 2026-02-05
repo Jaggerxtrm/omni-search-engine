@@ -1,0 +1,2 @@
+[console_scripts]
+account-qwen = qwen_credential.account_qwen:main
