@@ -13,7 +13,7 @@ changelog:
 
 ## Settings Schema (`settings.py`)
 
-Configuration is managed via Pydantic `BaseSettings`, reading from `.env`, `config.yaml`, and environment variables.
+Configuration is managed via Pydantic `BaseSettings`, reading from `.env`, `config.yaml`, and environment variables. Nested settings classes (Embedding, Chunking, etc.) are implemented as `BaseModel` and initialized via a `model_validator` in the main `Settings` class to ensure environment variables are correctly mapped.
 
 ### Global Settings
 - `OBSIDIAN_VAULT_PATH`: (Legacy/Primary) Path to the main vault.

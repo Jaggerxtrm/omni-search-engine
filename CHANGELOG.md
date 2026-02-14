@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Docker Config**: Enabled live code mounting for development.
 
 ### Fixed
+- **Settings**: Resolved `Pydantic ValidationError` where nested settings didn't receive environment variables.
 - **Indexer**: Resolved type errors and metadata handling.
 - **Watcher**: Fixed issues with file event handling.
 
