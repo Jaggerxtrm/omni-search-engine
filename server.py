@@ -188,6 +188,51 @@ async def semantic_search(
         logger.error(f"Search failed: {e}", exc_info=True)
         return [{"error": f"Search failed: {str(e)}", "query": query}]
 
+@mcp.tool()
+async def get_full_context(parent_id: str) -> dict[str, Any]:
+    """
+    Retrieve all chunks and full content for a specific parent document.
+    Useful for seeing the complete context of a search result.
+
+    Args:
+        parent_id: The unique ID of the parent document (e.g., "vault::notes/gold.md")
+
+    Returns:
+        Dict containing all chunks, metadata, and reconstructed full content
+    """
+    logger.info(f"Tool Call: get_full_context | Parent ID: {parent_id}")
+    try:
+        vector_store = get_vector_store()
+        results = await asyncio.to_thread(vector_store.get_by_parent_id, parent_id)
+
+        if not results["ids"] or len(results["ids"]) == 0:
+            return {"error": f"No content found for parent_id: {parent_id}"}
+
+        # Sort chunks by index to reconstruct properly
+        chunks = []
+        for i in range(len(results["ids"])):
+            chunks.append({
+                "id": results["ids"][i],
+                "content": results["documents"][i],
+                "metadata": results["metadatas"][i]
+            })
+        
+        # Sort by chunk_index
+        chunks.sort(key=lambda x: x["metadata"].get("chunk_index", 0))
+
+        # Reconstruct full content (simplified, might have overlaps)
+        full_content = "\n\n".join([c["content"] for c in chunks])
+
+        return {
+            "parent_id": parent_id,
+            "chunk_count": len(chunks),
+            "full_content": full_content,
+            "chunks": chunks
+        }
+    except Exception as e:
+        logger.error(f"Failed to get full context: {e}", exc_info=True)
+        return {"error": f"Failed to get full context: {str(e)}"}
+
 
 @mcp.tool()
 async def reindex_vault(force: bool = False) -> dict[str, Any]:

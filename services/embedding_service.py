@@ -165,7 +165,10 @@ class EmbeddingService:
         Raises:
             OpenAIError: On API errors
         """
-        response = await self.client.embeddings.create(input=texts, model=self.model)
+        # Preprocessing: replace newlines with spaces as recommended by OpenAI for better performance
+        processed_texts = [text.replace("\n", " ") for text in texts]
+        
+        response = await self.client.embeddings.create(input=processed_texts, model=self.model)
 
         # Extract embeddings in order
         embeddings = [item.embedding for item in response.data]

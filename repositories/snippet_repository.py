@@ -46,6 +46,13 @@ class VectorStore:
     def get_by_file_path(self, file_path: str) -> Dict[str, Any]:
         return self.collection.get(where={"file_path": file_path}, include=["embeddings", "metadatas", "documents"])
 
+    def get_by_parent_id(self, parent_id: str) -> Dict[str, Any]:
+        """Retrieve all chunks belonging to a specific parent document."""
+        return self.collection.get(
+            where={"parent_id": parent_id}, 
+            include=["documents", "metadatas"]
+        )
+
     def check_content_hash(self, file_path: str, source_id: str = None) -> Optional[str]:
         if source_id:
             where_clause = {

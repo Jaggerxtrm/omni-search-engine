@@ -26,6 +26,7 @@ class Chunk:
         note_title: Note filename without extension (set by indexer)
         folder: Parent folder path (set by indexer)
         tags: List of tags from note (set by indexer)
+        parent_id: Unique ID of the parent document (set by indexer)
     """
 
     content: str
@@ -36,6 +37,7 @@ class Chunk:
     note_title: str = ""
     folder: str = ""
     tags: list[str] = field(default_factory=list)
+    parent_id: str = ""
 
 
 class MarkdownChunker:
@@ -55,20 +57,23 @@ class MarkdownChunker:
         target_chunk_size: int = 800,
         max_chunk_size: int = 1500,
         min_chunk_size: int = 100,
+        chunk_overlap: int = 150,
         model: str = "text-embedding-3-small",
     ):
         """
-        Initialize chunker with size constraints.
+        Initialize chunker with size constraints and overlap.
 
         Args:
             target_chunk_size: Aim for this many tokens per chunk
             max_chunk_size: Never exceed this many tokens
             min_chunk_size: Merge chunks smaller than this
+            chunk_overlap: How many tokens should overlap between chunks
             model: OpenAI model for token counting
         """
         self.target_chunk_size = target_chunk_size
         self.max_chunk_size = max_chunk_size
         self.min_chunk_size = min_chunk_size
+        self.chunk_overlap = chunk_overlap
         self.model = model
 
     def chunk_markdown(self, content: str) -> list[Chunk]:
@@ -93,12 +98,12 @@ class MarkdownChunker:
             section_chunks = self._process_section(section)
             chunks.extend(section_chunks)
 
+        # Merge small chunks if possible
+        chunks = self._merge_small_chunks(chunks)
+
         # Assign chunk indices
         for i, chunk in enumerate(chunks):
             chunk.chunk_index = i
-
-        # Merge small chunks if possible
-        chunks = self._merge_small_chunks(chunks)
 
         return chunks
 
@@ -116,16 +121,19 @@ class MarkdownChunker:
         sections = []
         current_section_lines = []
         header_stack = []  # Track hierarchy: [(level, title), ...]
+        has_headers = False
 
         for line in lines:
             header_match = re.match(header_pattern, line)
 
             if header_match:
+                has_headers = True
                 # Save previous section if it has content
                 if current_section_lines:
                     header_context = self._build_header_context(header_stack)
-                    section_content = "\n".join(current_section_lines)
-                    sections.append((header_context, section_content))
+                    section_content = "\n".join(current_section_lines).strip()
+                    if section_content:
+                        sections.append((header_context, section_content))
                     current_section_lines = []
 
                 # Update header stack
@@ -146,12 +154,13 @@ class MarkdownChunker:
         # Add final section
         if current_section_lines:
             header_context = self._build_header_context(header_stack)
-            section_content = "\n".join(current_section_lines)
-            sections.append((header_context, section_content))
+            section_content = "\n".join(current_section_lines).strip()
+            if section_content:
+                sections.append((header_context, section_content))
 
-        # If no headers found, treat entire content as one section
-        if not sections and content.strip():
-            sections.append(("", content))
+        # If no headers found at all, treat entire content as one section
+        if not has_headers and content.strip():
+            return [("", content.strip())]
 
         return sections
 
@@ -212,7 +221,7 @@ class MarkdownChunker:
 
     def _split_by_paragraphs(self, header_context: str, content: str) -> list[Chunk]:
         """
-        Split content into chunks on paragraph boundaries.
+        Split content into chunks on paragraph boundaries with overlap.
         Respects code blocks and tables as atomic units.
 
         Args:
@@ -254,12 +263,6 @@ class MarkdownChunker:
 
                 # Check if it's a protected block (code or table)
                 if self._is_protected_block(paragraph):
-                    # For protected blocks, we prefer to keep them whole even if slightly oversized
-                    # OR split by lines if absolutely necessary.
-                    # For now, let's treat them as atomic and allow them to exceed max_size slightly
-                    # matching the implementation plan preference not to break code.
-                    # If it's absurdly large, we might need line splitting, but let's just log/warn
-                    # or currently just append it as a single chunk.
                     chunks.append(
                         Chunk(
                             content=paragraph,
@@ -288,9 +291,21 @@ class MarkdownChunker:
                         token_count=current_token_count,
                     )
                 )
-                # Start new chunk
-                current_chunk_paragraphs = [paragraph]
-                current_token_count = para_tokens
+                
+                # PREPARE OVERLAP: find how many paragraphs to keep for the next chunk
+                overlap_paragraphs = []
+                overlap_tokens = 0
+                for p in reversed(current_chunk_paragraphs):
+                    p_tokens = count_tokens(p, self.model)
+                    if overlap_tokens + p_tokens <= self.chunk_overlap:
+                        overlap_paragraphs.insert(0, p)
+                        overlap_tokens += p_tokens
+                    else:
+                        break
+                
+                # Start new chunk with overlap + current paragraph
+                current_chunk_paragraphs = overlap_paragraphs + [paragraph]
+                current_token_count = overlap_tokens + para_tokens
             else:
                 # Add to current chunk
                 current_chunk_paragraphs.append(paragraph)

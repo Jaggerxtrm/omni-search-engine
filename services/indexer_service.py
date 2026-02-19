@@ -254,6 +254,9 @@ class VaultIndexer:
         note_title = get_note_title(file_path)
         folder = get_folder(file_path, source_root)
         
+        # Unique parent ID for this file
+        parent_id = f"{source_id}::{relative_path}"
+        
         # Only compute rich metadata for Markdown
         if file_path.suffix == '.md':
              tags = extract_all_tags(content)
@@ -281,7 +284,7 @@ class VaultIndexer:
             chunk.file_path = relative_path
             chunk.note_title = note_title
             chunk.folder = folder
-            # Note: chunk.tags remains as list, but we store as string in ChromaDB metadata
+            chunk.parent_id = parent_id
 
         # Generate embeddings
         chunk_texts = [chunk.content for chunk in chunks]
@@ -292,7 +295,7 @@ class VaultIndexer:
         metadatas = [
             {
                 "file_path": chunk.file_path,
-                "source": source_id,            # NEW: Source ID
+                "source": source_id,            
                 "note_title": chunk.note_title,
                 "chunk_index": chunk.chunk_index,
                 "header_context": chunk.header_context,
@@ -302,6 +305,7 @@ class VaultIndexer:
                 "modified_date": modified_date,
                 "content_hash": content_hash,
                 "token_count": chunk.token_count,
+                "parent_id": chunk.parent_id, # Added parent_id to metadata
             }
             for chunk in chunks
         ]

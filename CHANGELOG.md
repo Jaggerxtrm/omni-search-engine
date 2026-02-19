@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - **Qwen Integration**: Uses local Qwen model for generating summaries.
 - **Docker Config**: Enabled live code mounting for development.
 
+
+### Changed
+- Refactored semantic search with text preprocessing, chunk overlap, and parent-child retrieval.
 ### Fixed
 - **Settings**: Resolved `Pydantic ValidationError` where nested settings didn't receive environment variables.
 - **Indexer**: Resolved type errors and metadata handling.

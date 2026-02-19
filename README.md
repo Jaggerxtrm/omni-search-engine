@@ -14,6 +14,7 @@ Agent-first semantic search system for Obsidian vaults using OpenAI embeddings, 
 - 📈 **Analytics Tools** - Find orphans, core concepts, and duplicate content
 - 🤖 **Shadow Observer** - Intelligent background agent that logs development sessions and summarizes work upon git commits
 - 🚀 **Local Reranking** - FlashRank integration for superior search relevance
+- 🏠 **Parent-Child Context** - Retrieve full document context from single search hits
 - 🐳 **Containerized** for easy deployment (Podman/Docker)
 - 🔒 **Privacy-focused** - vectors stored locally, queries never leave your machine
 - 🏗️ **Modular Architecture** - scalable design with Pydantic settings and Dependency Injection

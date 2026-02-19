@@ -1,12 +1,13 @@
 ---
 title: SSOT Data Ingestion & Indexing
-version: 0.4.0
-updated: 2026-01-24T22:55:00+01:00
+version: 0.4.1
+updated: 2026-02-19T17:35:00+01:00
 scope: data
 category: data
 subcategory: ingestion
 domain: [data, indexing, crawling]
 changelog:
+  - 0.4.1 (2026-02-19): Improved semantic search with text preprocessing, chunk overlap, and parent-child retrieval.
   - 0.4.0 (2026-01-24): Added Multi-Source Support and Reranking details.
   - 0.3.0 (2026-01-24): Added Startup Cleanup (Offline Move Detection)
   - 0.2.0 (2026-01-24): Updated Watcher logic for file moves/deletions
@@ -22,15 +23,18 @@ changelog:
     *   Compares with stored hash in `VectorStore`.
     *   Skips if match (Incremental Indexing).
 3.  **Parsing & Chunking**:
-    *   `Chunker` service splits content.
+    *   `Chunker` service splits content into semantic chunks.
+    *   **Chunk Overlap**: Implements sliding window overlap (default 150 tokens) to preserve context across boundaries.
     *   Preserves header hierarchy context.
     *   Extracts frontmatter and inline tags.
 4.  **Embedding**:
+    *   **Preprocessing**: Replaces newlines with spaces (OpenAI recommendation) for improved quality.
     *   Batches chunks.
     *   Sends to OpenAI API (`text-embedding-3-small`).
 5.  **Storage**:
     *   Upserts vectors + metadata + content hash to ChromaDB.
     *   **ID Schema**: `source::relative_path::chunk_index` (prevents collisions across sources).
+    *   **Parent-Child Retrieval**: Stores `parent_id` (source::path) in metadata to allow full document context reconstruction.
     *   Removes stale chunks for updated files.
 
 ## Auto-Indexing (Watch Mode)
@@ -59,3 +63,5 @@ Stored with each chunk in ChromaDB:
 - `content_hash`: MD5 of source file.
 - `tags`: Comma-separated string.
 - `folder`: Parent directory.
+- `parent_id`: Unique document ID (`source::file_path`) for full context retrieval.
+- `chunk_overlap`: (Internal) Tokens preserved from previous chunk.

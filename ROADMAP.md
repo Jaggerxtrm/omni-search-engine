@@ -391,6 +391,19 @@ def get_duplicate_content(similarity_threshold: float = 0.9) -> List[Dict[str, A
 
 ---
 
+### Priority 6: Search Quality & Context ✅ COMPLETE
+
+**Goal:** Improve embedding accuracy and retrieval context.
+
+**Implemented:**
+- **Text Preprocessing**: Implemented OpenAI-recommended newline-to-space normalization in `EmbeddingService` to improve vector quality.
+- **Sliding Window Overlap**: Added `chunk_overlap` (default 150 tokens) to `MarkdownChunker` to prevent context loss at chunk boundaries.
+- **Parent-Child Retrieval**:
+    - Added `parent_id` tracking to all chunks.
+    - New `get_full_context` tool to reconstruct the original document from any search hit.
+
+---
+
 ## Phase 3: Advanced Features
 
 ### Feature 1: Reranking for Better Search ✅ COMPLETE
@@ -691,6 +704,20 @@ For each Phase 2 feature:
 - With reranking (100 searches): ~$0.03
 
 Still well under $1/month for typical usage.
+
+### Feature 6: Hybrid Search (BM25 + Vector)
+
+**Goal:** Combine conceptual vector search with precise keyword matching for superior results.
+
+- **BM25 Index**: Build a local keyword index (via `rank_bm25`) for exact matches.
+- **RRF (Reciprocal Rank Fusion)**: Combine scores from vector search and BM25 into a single ranked list.
+
+### Feature 7: Graph-Augmented Retrieval
+
+**Goal:** Leverage note relationships (wikilinks) to improve relevance.
+
+- **Link-based Ranking**: Boost the scores of "core" notes (those with high in-degree/backlinks).
+- **Advanced `suggest_links`**: Use the document graph to suggest more contextually relevant connections.
 
 ---
 
