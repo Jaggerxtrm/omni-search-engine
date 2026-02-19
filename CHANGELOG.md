@@ -16,7 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Refactored semantic search with text preprocessing, chunk overlap, and parent-child retrieval.
+- **Chunker**: Improved code block and table integrity during chunking by ensuring they always start a new chunk.
+- **Repository**: Added `create_vector_store` factory function to `snippet_repository.py`.
+
 ### Fixed
+- **Chunker**: Resolved regression where code blocks could be merged into chunks starting with normal text, breaking integrity.
 - **Settings**: Resolved `Pydantic ValidationError` where nested settings didn't receive environment variables.
 - **Indexer**: Resolved type errors and metadata handling.
 - **Watcher**: Fixed issues with file event handling.

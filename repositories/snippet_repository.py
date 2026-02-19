@@ -243,3 +243,7 @@ class VectorStore:
         with self._lock:
             self.client.delete_collection(self.collection.name)
             self.collection = self.client.create_collection(self.collection.name)
+
+def create_vector_store(persist_directory: str, collection_name: str = "obsidian_notes") -> VectorStore:
+    """Factory function to create a VectorStore instance."""
+    return VectorStore(persist_directory=persist_directory, collection_name=collection_name)

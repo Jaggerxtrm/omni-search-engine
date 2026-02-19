@@ -244,10 +244,26 @@ class MarkdownChunker:
                 continue
 
             para_tokens = count_tokens(paragraph, self.model)
+            is_protected = self._is_protected_block(paragraph)
+
+            # FORCE SPLIT for protected blocks to ensure integrity
+            # If current paragraph is protected AND we already have content, save current chunk first
+            if is_protected and current_chunk_paragraphs:
+                chunk_content = "\n\n".join(current_chunk_paragraphs)
+                chunks.append(
+                    Chunk(
+                        content=chunk_content,
+                        chunk_index=0,
+                        header_context=header_context,
+                        token_count=current_token_count,
+                    )
+                )
+                current_chunk_paragraphs = []
+                current_token_count = 0
 
             # If single paragraph exceeds max size
             if para_tokens > self.max_chunk_size:
-                # Save current chunk if any
+                # Save current chunk if any (already handled for protected above, but good for normal)
                 if current_chunk_paragraphs:
                     chunk_content = "\n\n".join(current_chunk_paragraphs)
                     chunks.append(
@@ -261,8 +277,7 @@ class MarkdownChunker:
                     current_chunk_paragraphs = []
                     current_token_count = 0
 
-                # Check if it's a protected block (code or table)
-                if self._is_protected_block(paragraph):
+                if is_protected:
                     chunks.append(
                         Chunk(
                             content=paragraph,
@@ -293,15 +308,20 @@ class MarkdownChunker:
                 )
                 
                 # PREPARE OVERLAP: find how many paragraphs to keep for the next chunk
+                # We skip overlap if the current paragraph is protected to avoid splitting it
                 overlap_paragraphs = []
                 overlap_tokens = 0
-                for p in reversed(current_chunk_paragraphs):
-                    p_tokens = count_tokens(p, self.model)
-                    if overlap_tokens + p_tokens <= self.chunk_overlap:
-                        overlap_paragraphs.insert(0, p)
-                        overlap_tokens += p_tokens
-                    else:
-                        break
+                if not is_protected:
+                    for p in reversed(current_chunk_paragraphs):
+                        # Don't overlap protected blocks into normal chunks as it might break their structure
+                        if self._is_protected_block(p):
+                            break
+                        p_tokens = count_tokens(p, self.model)
+                        if overlap_tokens + p_tokens <= self.chunk_overlap:
+                            overlap_paragraphs.insert(0, p)
+                            overlap_tokens += p_tokens
+                        else:
+                            break
                 
                 # Start new chunk with overlap + current paragraph
                 current_chunk_paragraphs = overlap_paragraphs + [paragraph]
