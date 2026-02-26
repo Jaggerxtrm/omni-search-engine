@@ -554,11 +554,9 @@ where_filter = {
 
 #### 5a. Semantic Code Search
 Integrate functionality inspired by `zilliztech/claude-context`.
-- **Hybrid Search:** Combine Dense Vector Search (semantic) with BM25 (keyword exact match) for best precision.
-- **Smart Indexing:**
-  - **AST-based Chunking:** Use Abstract Syntax Trees to respect function/class boundaries (Language-aware).
-  - **Incremental Updates:** Use Merkle Trees or content hashing for efficient re-indexing.
-- **Search:** "Where is authentication handled?" -> Returns `auth.py`
+- **Context-Aware Retrieval**: Leverage the unified vector space to find relevant code snippets.
+- **Language-Specific Metadata**: Extract class/function names as searchable metadata.
+- **Search**: "Where is authentication handled?" -> Returns `auth.py`
 
 #### 5b. Git History Search
 Index commit messages and diffs to allow searching through project history.
@@ -718,6 +716,20 @@ Still well under $1/month for typical usage.
 
 - **Link-based Ranking**: Boost the scores of "core" notes (those with high in-degree/backlinks).
 - **Advanced `suggest_links`**: Use the document graph to suggest more contextually relevant connections.
+
+### Feature 8: Query Expansion / Self-Querying
+
+**Goal:** Improve retrieval for vague or short queries using LLM pre-processing.
+
+- **Query Variations**: Use an LLM to generate 3-5 variations of the user's query to capture more semantic breadth.
+- **Self-Querying**: Extract metadata filters (tags, dates, folders) automatically from natural language (e.g., "notes from last week about gold").
+
+### Feature 9: AST-based Code Chunking
+
+**Goal:** Improve code search precision by respecting syntactic boundaries.
+
+- **AST Parser**: Use Python `ast` and tree-sitter for other languages to identify function and class boundaries.
+- **Atomic Code Chunks**: Ensure code is never split mid-function, preserving the full context of a logic block.
 
 ---
 

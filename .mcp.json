@@ -1,17 +1,72 @@
 {
   "mcpServers": {
+    "context7": {
+      "type": "http",
+      "url": "https://mcp.context7.com/mcp"
+    },
+    "deepwiki": {
+      "type": "http",
+      "url": "https://mcp.deepwiki.com/mcp"
+    },
+    "github-grep": {
+      "type": "http",
+      "url": "https://mcp.grep.app"
+    },
+    "gmail": {
+      "args": [
+        "-y",
+        "@gongrzhe/server-gmail-autoauth-mcp"
+      ],
+      "command": "npx",
+      "type": "stdio"
+    },
+    "maestro-status": {
+      "args": [],
+      "command": "/usr/bin/maestro-mcp-server",
+      "env": {
+        "MAESTRO_INSTANCE_ID": "e87f8574-8444-4b48-ac96-fcea051c9dcc",
+        "MAESTRO_SESSION_ID": "1",
+        "MAESTRO_STATUS_URL": "http://127.0.0.1:9901/status"
+      },
+      "type": "stdio"
+    },
     "omni-search-engine": {
       "type": "sse",
       "url": "http://127.0.0.1:8765/sse"
     },
+    "serena": {
+      "args": [
+        "--from",
+        "git+https://github.com/oraios/serena",
+        "serena",
+        "start-mcp-server",
+        "--context",
+        "ide-assistant",
+        "--project",
+        "yfinance-test"
+      ],
+      "command": "uvx",
+      "type": "stdio"
+    },
     "unitAI": {
-      "type": "stdio",
-      "command": "npx",
       "args": [
         "-y",
         "@jaggerxtrm/unitai"
       ],
-      "env": {}
+      "command": "npx",
+      "type": "stdio"
+    },
+    "yfinance-market-intelligence": {
+      "args": [
+        "exec",
+        "-i",
+        "yfinance-mcp-server",
+        "python",
+        "-m",
+        "mcp_server.mcp_server"
+      ],
+      "command": "podman",
+      "type": "stdio"
     }
   }
 }
