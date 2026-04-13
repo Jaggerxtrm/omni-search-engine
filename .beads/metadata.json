@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "server",
+  "dolt_database": "omni_search_engine",
+  "project_id": "424a0e47-c81c-4d10-b338-978b8bda1795"
+}

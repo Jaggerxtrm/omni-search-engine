@@ -11,3 +11,7 @@ venv/
 .ruff_cache/
 check_output*.txt
 .worktrees/
+
+# Dolt database files (added by bd init)
+.dolt/
+*.db
