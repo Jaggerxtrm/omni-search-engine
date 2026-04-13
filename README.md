@@ -1,186 +1,119 @@
-# Obsidian Semantic Search MCP Server
+# vaultctl (omni-search-engine)
 
-Agent-first semantic search system for Obsidian vaults using OpenAI embeddings, ChromaDB vector store, and FastMCP.
+Local-first search and vault operations for markdown knowledge bases, now powered by **vaultctl**.
 
-## Features
+> This project replaced the old ChromaDB/OpenAI/FastMCP stack with a SQLite FTS5/BM25 backend and a CLI-first workflow.
 
-- 🔍 **Semantic search** across your entire vault
-- 🌐 **Universal Context** - Index multiple projects and your current workspace simultaneously
-- 🔗 **Smart link suggestions** based on content similarity
-- ⚡ **Async Architecture** - Non-blocking operations for high performance
-- 📊 **Markdown-aware chunking** with header hierarchy preservation
-- 💾 **Incremental indexing** with content-hash caching (saves API costs)
-- 🧹 **Offline Cleanup** - Automatically detects and removes ghost notes on startup
-- 📈 **Analytics Tools** - Find orphans, core concepts, and duplicate content
-- 🤖 **Shadow Observer** - Intelligent background agent that logs development sessions and summarizes work upon git commits
-- 🚀 **Local Reranking** - FlashRank integration for superior search relevance
-- 🏠 **Parent-Child Context** - Retrieve full document context from single search hits
-- 🐳 **Containerized** for easy deployment (Podman/Docker)
-- 🔒 **Privacy-focused** - vectors stored locally, queries never leave your machine
-- 🏗️ **Modular Architecture** - scalable design with Pydantic settings and Dependency Injection
-- 🛡️ **Robust CI/CD** - Type checking (MyPy), Linting (Ruff), and Pre-commit hooks
+## What changed
 
-## Status
+- ✅ Replaced vector/embedding stack with SQLite FTS5 (`unicode61`) + BM25 ranking
+- ✅ Added CLI-first interface (`vaultctl ...`)
+- ✅ Kept backward compatibility for legacy MCP tool names via `src/vaultctl/mcp/adapters.py`
+- ✅ Standardized config at `~/.config/vaultctl/config.toml`
+- ✅ Standardized DB path at `~/.local/share/vaultctl/index.db`
 
-**Current Progress:** Feature Complete & Containerized ✅
-
-✅ **Completed:**
-- **Async Refactor**: Fully asynchronous server and tool execution
-- **Code Quality**: Strict type checking (Python 3.13) and linting pipeline
-- **Modular Architecture**: Service-based design with Dependency Injection
-- **Robust Configuration**: Pydantic-based settings validation
-- **Containerization**: Optimized image `omni-search-engine`
-- **Core Features**: All MVP tools (Search, Indexing, Stats, Link Suggestions)
-- **Auto-Indexing**: Efficient file watcher with coalescing debounce
-- **Analytics Suite**: Tools for vault health (Orphans, Duplicates, Ranking)
-- **Startup Cleanup**: Self-healing index logic
-
-## Architecture
-
-```
-Obsidian Vault (.md files)
-    ↓
-File Watcher / API Tools (Async)
-    ↓
-Services Layer (Indexer, Embeddings)
-    ↓
-Repositories Layer (ChromaDB)
-    ↓
-MCP Server (FastMCP)
-```
-
-## Prerequisites
-
-- **Podman** or **Docker** (for containerized deployment)
-- **OpenAI API key** (for embeddings)
-- **Obsidian vault** with markdown files
-- **Python 3.13+** (for local development)
-
-## Installation
-
-### 1. Configure Environment
+## Install
 
 ```bash
-cd tools/obsidian-semantic-search
-cp .env.example .env
-# Edit .env: Set OPENAI_API_KEY and VAULT_PATH
+pip install -e .
 ```
 
-### 2. Build and Run
+This exposes the `vaultctl` command from `pyproject.toml`.
+
+## Configuration
+
+Create `~/.config/vaultctl/config.toml`:
+
+```toml
+db_path = "~/.local/share/vaultctl/index.db"
+
+[[sources]]
+id = "vault"
+root = "~/second-mind"
+include_glob = "**/*.md"
+exclude_glob = "**/.obsidian/**"
+
+[[sources]]
+id = "transcripts"
+root = "~/dev/transcriptoz/transcripts"
+include_glob = "*.analysis.md"
+```
+
+Notes:
+- `[[sources]]` must be non-empty if config file exists.
+- If the config file is absent, vaultctl falls back to defaults from `src/vaultctl/core/config.py`.
+
+## CLI quickstart
 
 ```bash
-# Using Podman Compose
-podman-compose up -d --build
+# index all configured sources
+vaultctl index --json
 
-# Or manual run
-podman run -d --name omni-search-engine \
-  --env-file .env \
-  -v /path/to/vault:/vault:ro \
-  -v chroma_data:/data/chromadb \
-  omni-search-engine
+# run a search
+vaultctl search "hybrid retrieval" -n 8 --json
+
+# inspect corpus state
+vaultctl status --json
+vaultctl stats --json
+
+# content discovery helpers
+vaultctl find "planner" --source vault -n 20 --json
+vaultctl tree --source vault --depth 3 --json
+vaultctl context "notes/roadmap.md" --json
+
+# note operations
+vaultctl note read "notes/todo.md" --source vault --json
+vaultctl note append "notes/todo.md" "\n- finish migration" --source vault --json
+
+# audits
+vaultctl audit orphans --source vault -n 50 --json
 ```
 
-### 3. MCP Server Configuration
+## Run as MCP bridge (legacy clients)
 
-Add to `~/.config/claude/claude_desktop_config.json`:
+For clients expecting MCP-style tool invocation, run:
 
-```json
-{
-  "mcpServers": {
-    "omni-search-engine": {
-      "command": "podman",
-      "args": [
-        "run", "--rm", "-i",
-        "-v", "/your/vault/path:/vault:ro",
-        "-v", "obsidian_search_data:/data/chromadb",
-        "-e", "OPENAI_API_KEY",
-        "omni-search-engine:latest"
-      ],
-      "env": {
-        "OPENAI_API_KEY": "sk-..."
-      }
-    }
-  }
-}
+```bash
+vaultctl mcp serve --transport stdio
 ```
 
-**Important:** Replace paths with your actual vault location and API key.
+The bridge serves legacy tool names using adapter functions in `src/vaultctl/mcp/adapters.py`.
 
-## Universal Context (Multi-Source)
+## Migration guide: old MCP calls → vaultctl
 
-The server now supports indexing multiple sources. By default, it indexes:
-1. **Main Vault**: Defined by `VAULT_PATH` in `.env`.
-2. **Current Project**: The directory where the server is running (auto-detected).
+Use this mapping when replacing old calls:
 
-You can explicitly configure sources in `config.yaml`:
-```yaml
-sources:
-  - id: "my-vault"
-    name: "Personal Knowledge Base"
-    path: "/home/user/obsidian"
-    type: "obsidian"
-  - id: "work-repo"
-    name: "Work Docs"
-    path: "/home/user/work/docs"
-    type: "code"
-```
+| Old MCP call | New vaultctl command |
+|---|---|
+| `semantic_search(query, n_results=5)` | `vaultctl search "<query>" -n 5 --json` |
+| `search_notes(query, n_results=5)` | `vaultctl search "<query>" -n 5 --json` |
+| `reindex_vault(force=True)` | `vaultctl index --full --json` |
+| `get_index_stats()` | `vaultctl status --json` |
+| `get_vault_statistics()` | `vaultctl stats --json` |
+| `get_full_context(parent_id)` | `vaultctl context "<parent_id>" --json` |
+| `get_vault_structure(root_path, max_depth)` | `vaultctl tree "<root_path>" --depth <max_depth> --json` |
+| `read_note(note_path)` | `vaultctl note read "<note_path>" --json` |
+| `write_note(note_path, content)` | `vaultctl note write "<note_path>" "<content>" --json` |
+| `append_to_note(note_path, content)` | `vaultctl note append "<note_path>" "<content>" --json` |
+| `delete_note(note_path)` | `vaultctl note delete "<note_path>" --json` |
+| `get_orphaned_notes()` | `vaultctl audit orphans --json` |
+| `get_most_linked_notes(n_results=10)` | `vaultctl audit linked -n 10 --json` |
+| `get_duplicate_content(...)` | `vaultctl audit duplicates --json` |
+
+## Code layout (current)
+
+- `src/vaultctl/cli/` — CLI commands and argument parsing
+- `src/vaultctl/services/` — business logic
+- `src/vaultctl/store/` — SQLite, indexing, FTS query execution
+- `src/vaultctl/ingest/` — markdown/transcript parsing
+- `src/vaultctl/mcp/` — stdio MCP adapter bridge and legacy mappings
 
 ## Development
 
-### Setup
-
 ```bash
-# Install dependencies
-pip install -r requirements.txt
-
-# Install pre-commit hooks
-pre-commit install
+# format/lint/typecheck (project tooling)
+ruff check .
+mypy src
 ```
 
-### Running Tests & Checks
-
-We provide a convenience script to run the full CI suite:
-
-```bash
-./scripts/check.sh
-```
-
-This runs:
-- **Ruff**: Linting and formatting
-- **MyPy**: Static type checking
-- **Pytest**: Unit and integration tests
-
-## Project Structure
-
-```
-obsidian-semantic-search/
-├── api/                   # API endpoints (if applicable)
-├── crawlers/              # Content parsers (markdown_crawler.py)
-├── models/                # Data models
-├── repositories/          # Data access (snippet_repository.py)
-├── services/              # Business logic (indexer, embedding)
-├── tests/                 # Test suite (pytest)
-├── scripts/               # CI/CD and utility scripts
-├── server.py              # Main FastMCP entry point (Async)
-├── settings.py            # Pydantic configuration
-├── dependencies.py        # Dependency Injection container
-├── logger.py              # Centralized logging
-├── watcher.py             # File system watcher
-├── .pre-commit-config.yaml # Git hooks configuration
-├── pyproject.toml         # Tool configuration (Ruff, MyPy)
-├── Dockerfile             # Container definition
-└── docker-compose.yml     # Compose configuration
-```
-
-## Troubleshooting
-
-### Runtime Errors
-- **`anyio.ClosedResourceError`**: You may see this in logs when clients disconnect. This is a known upstream issue with `anyio>=4.5` and `mcp` interaction. It is generally benign and does not affect server functionality.
-
-### Container Issues
-- Ensure you are using the correct image name: `omni-search-engine`.
-- Check volume mounts permissions (`:ro` for vault, read-write for `chromadb`).
-
-## License
-
-MIT
+(Use project-specific CI scripts if available.)
