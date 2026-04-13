@@ -9,6 +9,7 @@ class SourceConfig:
     id: str
     root: Path
     include_glob: str
+    exclude_glob: str | None = None
 
 
 @dataclass(frozen=True)

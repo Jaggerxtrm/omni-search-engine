@@ -32,10 +32,11 @@ def load_config(config_path: Path = CONFIG_PATH) -> AppConfig:
     sources: list[SourceConfig] = []
     for raw_source in raw_sources:
         source_id = raw_source.get("id")
-        root = raw_source.get("root")
+        root = raw_source.get("root") or raw_source.get("root_path")
         include_glob = raw_source.get("include_glob", "**/*.md")
+        exclude_glob = raw_source.get("exclude_glob") or None
         if not isinstance(source_id, str) or not isinstance(root, str):
             raise ConfigError(f"Invalid source entry in {config_path}: {raw_source}")
-        sources.append(SourceConfig(id=source_id, root=Path(root).expanduser(), include_glob=include_glob))
+        sources.append(SourceConfig(id=source_id, root=Path(root).expanduser(), include_glob=include_glob, exclude_glob=exclude_glob))
 
     return AppConfig(db_path=db_path, sources=tuple(sources))
