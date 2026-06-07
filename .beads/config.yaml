@@ -52,3 +52,11 @@
 # - linear.api-key
 # - github.org
 # - github.repo
+
+export:
+  git-add: false
+
+dolt:
+  port: 3308
+  auto-start: false
+  shared-server: true
