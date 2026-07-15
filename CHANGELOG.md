@@ -1,3 +1,23 @@
+
+## [Unreleased]
+
+### Project maintenance
+
+- **E2e pytest suite and vaultctl documentation update** ([08d8e22](https://github.com/Jaggerxtrm/omni-search-engine/commit/08d8e22b9b807c888ca084013eb64de335fcc09c)) — 2026-04-13 17:01
+
+  - tests/vaultctl/test_vaultctl_e2e.py: full e2e coverage (search, index,
+    note CRUD, find/tree/context, stats/status, audit, 16 MCP adapters)
+  - CLAUDE.md: rewritten around vaultctl architecture, CLI reference, config format
+  - README.md: install guide, quickstart, MCP bridge usage, legacy migration table
+
+
+- **Sync xtrm v0.9.0 assets** ([468d890](https://github.com/Jaggerxtrm/omni-search-engine/commit/468d8905583b4590fc4bc43f991dfdd348370ad5)) — 2026-06-07 01:47
+
+
+- **Add git-cliff config and changelog** ([495aa77](https://github.com/Jaggerxtrm/omni-search-engine/commit/495aa7708e57d0da0b3e2e20d8807efb806db434)) — 2026-07-14 00:55
+
+  Generic type-based parsers; repo-specific scopes to be tuned (see P0 bead).
+
 # Changelog
 
 All notable changes to this project will be documented in this file.
