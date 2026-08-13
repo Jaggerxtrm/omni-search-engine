@@ -54,9 +54,10 @@
 # - github.repo
 
 export:
-  git-add: false
-
+    git-add: false
 dolt:
-  port: 3308
-  auto-start: false
-  shared-server: true
+    port: 3308
+    auto-start: false
+    shared-server: true
+sync:
+    remote: "git+ssh://git@github.com/Jaggerxtrm/omni-search-engine.git"
